@@ -12,8 +12,8 @@ Requirements for initial release. Each maps to roadmap phases.
 - [ ] **CORE-01**: Agent loop with stop_reason handling — while loop that processes tool_use until text response
 - [ ] **CORE-05**: Multi-backend LLM provider — abstract trait for Anthropic, OpenAI, Ollama/local (partial: basic provider support)
 - [ ] **CORE-06**: CLI interface with clap — argument parsing and interactive mode
-- [ ] **CROSS-02**: Error classification (retryable vs non-retryable) — proper error handling per provider
-- [ ] **CROSS-03**: Graceful degradation when providers fail — fallback logic with user notification
+- [x] **CROSS-02**: Error classification (retryable vs non-retryable) — proper error handling per provider
+- [x] **CROSS-03**: Graceful degradation when providers fail — fallback logic with user notification
 - [ ] **CROSS-04**: Structured logging and observability — tracing/tracing-subscriber for diagnostics
 
 ### Phase 2: s02 - Tool Use
@@ -93,7 +93,7 @@ Deferred to future release. Tracked but not in current roadmap.
 Explicitly excluded. Documented to prevent scope creep.
 
 | Feature | Reason |
-|---------|--------|
+| ------- | ------ |
 | LLM training/fine-tuning | This is a harness, not model development |
 | Mobile applications | Web-first, mobile-responsive later |
 | Cloud deployment infrastructure | Local-first tool |
@@ -107,12 +107,12 @@ Explicitly excluded. Documented to prevent scope creep.
 Which phases cover which requirements. Updated during roadmap creation.
 
 | Requirement | Phase | Status |
-|-------------|-------|--------|
+| ----------- | ----- | ------ |
 | CORE-01 | Phase 1 | Pending |
 | CORE-05 (partial) | Phase 1 | Pending |
 | CORE-06 | Phase 1 | Pending |
-| CROSS-02 | Phase 1 | Pending |
-| CROSS-03 | Phase 1 | Pending |
+| CROSS-02 | Phase 1 | Complete |
+| CROSS-03 | Phase 1 | Complete |
 | CROSS-04 | Phase 1 | Pending |
 | CORE-02 | Phase 2 | Pending |
 | CORE-03 | Phase 2 | Pending |
@@ -137,6 +137,7 @@ Which phases cover which requirements. Updated during roadmap creation.
 | TEAM-06 | Phase 12 | Pending |
 
 **Coverage:**
+
 - v1 requirements: 25 total (counting partial implementations separately)
 - Phase mappings: 25
 - Unmapped: 0 ✓
