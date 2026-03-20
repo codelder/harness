@@ -10,7 +10,7 @@ Requirements for initial release. Each maps to roadmap phases.
 ### Phase 1: s01 - Agent Loop
 
 - [ ] **CORE-01**: Agent loop with stop_reason handling — while loop that processes tool_use until text response
-- [ ] **CORE-05**: Multi-backend LLM provider — abstract trait for Anthropic, OpenAI, Ollama/local (partial: basic provider support)
+- [x] **CORE-05**: Multi-backend LLM provider — abstract trait for Anthropic, OpenAI, Ollama/local (partial: basic provider support)
 - [ ] **CORE-06**: CLI interface with clap — argument parsing and interactive mode
 - [x] **CROSS-02**: Error classification (retryable vs non-retryable) — proper error handling per provider
 - [x] **CROSS-03**: Graceful degradation when providers fail — fallback logic with user notification
@@ -21,7 +21,7 @@ Requirements for initial release. Each maps to roadmap phases.
 - [ ] **CORE-02**: Tool dispatch system with handler registration — dispatch map: name -> handler function
 - [ ] **CORE-03**: Bash tool for command execution — execute shell commands with output capture
 - [ ] **CORE-04**: Read/Write/Edit file tools — atomic file operations for code manipulation
-- [ ] **CORE-05**: Multi-backend LLM provider — complete multi-provider support (Anthropic, OpenAI, Ollama)
+- [x] **CORE-05**: Multi-backend LLM provider — complete multi-provider support (Anthropic, OpenAI, Ollama)
 - [ ] **PLAN-05**: Glob/Grep tools for code search — pattern matching for file discovery
 - [ ] **PERS-04**: Sandbox execution with interactive confirmation — nix/seccomp isolation, confirm for system access (partial: basic sandbox)
 - [ ] **CROSS-01**: MCP protocol support via rmcp — Model Context Protocol for extensibility
