@@ -41,9 +41,9 @@ This roadmap transforms the 12-session learn-claude-code curriculum into a phase
 **Plans**: 4 plans in 4 waves
 
 Plans:
-- [ ] 01-01-PLAN.md — Project foundation & error infrastructure (Wave 0)
-- [ ] 01-02-PLAN.md — LLM provider layer (Wave 1)
-- [ ] 01-03-PLAN.md — Agent loop core (Wave 2)
+- [x] 01-01-PLAN.md — Project foundation & error infrastructure (Wave 0)
+- [x] 01-02-PLAN.md — LLM provider layer (Wave 1)
+- [x] 01-03-PLAN.md — Agent loop core (Wave 2)
 - [ ] 01-04-PLAN.md — CLI session interface (Wave 3)
 
 ### Phase 2: s02 - Tool Use
