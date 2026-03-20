@@ -1,4 +1,4 @@
-use harness::{agent_loop, with_retry, Message, Role, AgentError};
+use harness::{with_retry, Message, Role, AgentError};
 
 #[test]
 fn test_message_types() {
