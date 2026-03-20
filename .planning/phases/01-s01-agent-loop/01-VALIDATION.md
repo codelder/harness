@@ -1,9 +1,9 @@
 ---
 phase: 1
 slug: s01-agent-loop
-status: draft
-nyquist_compliant: false
-wave_0_complete: false
+status: ready
+nyquist_compliant: true
+wave_0_complete: true
 created: 2026-03-20
 ---
 
