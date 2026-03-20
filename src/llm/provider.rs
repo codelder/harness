@@ -92,6 +92,39 @@ impl LlmProvider {
             }
         }
     }
+
+    /// Send a chat message with conversation history (rig Message type)
+    ///
+    /// # Arguments
+    /// * `prompt` - The prompt message to send
+    /// * `chat_history` - Previous conversation history as rig Messages
+    ///
+    /// # Returns
+    /// The LLM's response as a string
+    ///
+    /// # Errors
+    /// Returns PromptError if the request fails
+    pub async fn chat_with_history(
+        &self,
+        prompt: impl Into<String>,
+        chat_history: Vec<Message>,
+    ) -> Result<String, PromptError> {
+        match self {
+            LlmProvider::Anthropic(agent) => {
+                agent.chat(prompt.into(), chat_history).await
+            }
+            LlmProvider::Openai(agent) => {
+                agent.chat(prompt.into(), chat_history).await
+            }
+            LlmProvider::Ollama => {
+                Err(PromptError::CompletionError(
+                    rig::completion::CompletionError::ResponseError(
+                        "Ollama provider not yet implemented".to_string()
+                    )
+                ))
+            }
+        }
+    }
 }
 
 /// Create an LLM provider based on provider type and model
