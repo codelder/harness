@@ -2,6 +2,7 @@ use crate::error::ProviderError;
 use rig::agent::Agent;
 use rig::client::{CompletionClient, ProviderClient};
 use rig::completion::{Chat, Message, PromptError};
+use rig::providers::openai::responses_api::ResponsesCompletionModel;
 use rig::providers::{anthropic, openai};
 
 /// Supported LLM provider types
@@ -43,7 +44,7 @@ impl std::str::FromStr for ProviderType {
 /// - All providers known at compile time
 pub enum LlmProvider {
     Anthropic(Agent<anthropic::completion::CompletionModel>),
-    Openai(Agent<openai::completion::CompletionModel>),
+    Openai(Agent<ResponsesCompletionModel>),
     // Ollama support will be added when rig-core supports it natively
     // Currently using placeholder for future implementation
     Ollama,
@@ -121,8 +122,7 @@ pub fn create_provider(provider_type: ProviderType, model: &str) -> Result<LlmPr
                 .map_err(|_| ProviderError::MissingApiKey("openai".to_string()))?;
 
             let client = openai::Client::from_env();
-            // Use legacy completion API instead of responses API
-            let agent = client.completions_api().agent(model).build();
+            let agent = client.agent(model).build();
             Ok(LlmProvider::Openai(agent))
         }
         ProviderType::Ollama => {

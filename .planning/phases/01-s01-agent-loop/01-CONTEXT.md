@@ -32,6 +32,7 @@ LLM becomes an agent through core loop that processes responses until text outpu
 - Use rig-core's multi-provider abstraction layer
 - Provider selection via CLI flag: `--provider anthropic|openai|ollama`
 - API keys from environment variables: `ANTHROPIC_API_KEY`, `OPENAI_API_KEY`
+- Custom base URL from environment variables: `ANTHROPIC_BASE_URL`, `OPENAI_BASE_URL`
 
 ### CLI Interaction Mode
 - REPL-style interactive session (not single-shot command)

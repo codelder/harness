@@ -48,11 +48,12 @@ The harness provides the environment that enables an LLM (the agent) to perceive
 
 This project follows the learn-claude-code curriculum which teaches that **the model IS the agent**. The harness is everything the agent needs to function in a domain:
 
-```
+```text
 Harness = Tools + Knowledge + Observation + Action Interfaces + Permissions
 ```
 
 The 12 sessions build progressively:
+
 - **Phase 1 (s01-s02)**: The Loop — basic agent loop and tool dispatch
 - **Phase 2 (s03-s06)**: Planning & Knowledge — TodoWrite, subagents, skills, compression
 - **Phase 3 (s07-s08)**: Persistence — task system and background execution
@@ -70,7 +71,7 @@ The 12 sessions build progressively:
 ## Key Decisions
 
 | Decision | Rationale | Outcome |
-|----------|-----------|---------|
+| -------- | --------- | ------- |
 | Tokio async runtime | Industry standard, best ecosystem, proven at scale | — Pending |
 | Multi-backend LLM | Flexibility for different models, future-proof | — Pending |
 | Sandbox-first security | Safety by default, explicit trust escalation | — Pending |
@@ -78,4 +79,4 @@ The 12 sessions build progressively:
 | MCP protocol support | Extensibility, standard tool integration | — Pending |
 
 ---
-*Last updated: 2025-03-20 after initialization*
+Last updated: 2025-03-20 after initialization
