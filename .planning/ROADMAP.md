@@ -11,7 +11,7 @@ This roadmap transforms the 12-session learn-claude-code curriculum into a phase
 - Integer phases (1-12): Planned milestone work aligned with curriculum sessions
 - Decimal phases (2.1, 2.2): Urgent insertions (marked with INSERTED)
 
-- [ ] **Phase 1: s01 - Agent Loop** - Core agent loop with stop_reason handling
+- [x] **Phase 1: s01 - Agent Loop** - Core agent loop with stop_reason handling
 - [ ] **Phase 2: s02 - Tool Use** - Tool dispatch system and basic file/shell tools
 - [ ] **Phase 3: s03 - TodoWrite** - Task planning with nag reminders
 - [ ] **Phase 4: s04 - Subagents** - Subagent spawning with isolated context
@@ -44,7 +44,7 @@ Plans:
 - [x] 01-01-PLAN.md — Project foundation & error infrastructure (Wave 0)
 - [x] 01-02-PLAN.md — LLM provider layer (Wave 1)
 - [x] 01-03-PLAN.md — Agent loop core (Wave 2)
-- [ ] 01-04-PLAN.md — CLI session interface (Wave 3)
+- [x] 01-04-PLAN.md — CLI session interface (Wave 3)
 
 ### Phase 2: s02 - Tool Use
 
@@ -199,8 +199,8 @@ Phases execute in numeric order: 1 → 2 → 3 → ... → 12
 
 | Phase | Plans Complete | Status | Completed |
 |-------|----------------|--------|-----------|
-| 1. s01 - Agent Loop | 0/4 | Ready for execution | - |
-| 2. s02 - Tool Use | 0/TBD | Not started | - |
+| 1. s01 - Agent Loop | 4/4 | Complete | 2026-03-21 |
+| 2. s02 - Tool Use | 0/TBD | Ready for execution | - |
 | 3. s03 - TodoWrite | 0/TBD | Not started | - |
 | 4. s04 - Subagents | 0/TBD | Not started | - |
 | 5. s05 - Skills | 0/TBD | Not started | - |

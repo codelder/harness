@@ -11,10 +11,10 @@ Requirements for initial release. Each maps to roadmap phases.
 
 - [x] **CORE-01**: Agent loop with stop_reason handling — while loop that processes tool_use until text response (partial: basic loop with retry logic, tool handling in Phase 2)
 - [x] **CORE-05**: Multi-backend LLM provider — abstract trait for Anthropic, OpenAI, Ollama/local (partial: basic provider support)
-- [ ] **CORE-06**: CLI interface with clap — argument parsing and interactive mode
+- [x] **CORE-06**: CLI interface with clap — argument parsing and interactive mode
 - [x] **CROSS-02**: Error classification (retryable vs non-retryable) — proper error handling per provider
 - [x] **CROSS-03**: Graceful degradation when providers fail — fallback logic with user notification
-- [ ] **CROSS-04**: Structured logging and observability — tracing/tracing-subscriber for diagnostics
+- [x] **CROSS-04**: Structured logging and observability — tracing/tracing-subscriber for diagnostics
 
 ### Phase 2: s02 - Tool Use
 
@@ -108,12 +108,12 @@ Which phases cover which requirements. Updated during roadmap creation.
 
 | Requirement | Phase | Status |
 | ----------- | ----- | ------ |
-| CORE-01 | Phase 1 | Pending |
-| CORE-05 (partial) | Phase 1 | Pending |
-| CORE-06 | Phase 1 | Pending |
+| CORE-01 | Phase 1 | Complete |
+| CORE-05 (partial) | Phase 1 | Complete |
+| CORE-06 | Phase 1 | Complete |
 | CROSS-02 | Phase 1 | Complete |
 | CROSS-03 | Phase 1 | Complete |
-| CROSS-04 | Phase 1 | Pending |
+| CROSS-04 | Phase 1 | Complete |
 | CORE-02 | Phase 2 | Pending |
 | CORE-03 | Phase 2 | Pending |
 | CORE-04 | Phase 2 | Pending |
@@ -144,4 +144,4 @@ Which phases cover which requirements. Updated during roadmap creation.
 
 ---
 *Requirements defined: 2025-03-20*
-*Last updated: 2026-03-20 after roadmap creation with 12-phase structure*
+*Last updated: 2026-03-21 after Phase 1 completion*
