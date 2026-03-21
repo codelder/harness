@@ -1,23 +1,25 @@
 # Phase 1: s01 - Agent Loop - Context
 
 **Gathered:** 2026-03-20
-**Status:** Ready for planning
+**Updated:** 2026-03-21
+**Status:** Implementation complete
 
 <domain>
 ## Phase Boundary
 
-LLM becomes an agent through core loop that processes responses until text output. This phase delivers the foundational agent loop with stop_reason handling, multi-provider LLM support, and interactive CLI.
+LLM becomes an agent through core loop that processes responses until text output. This phase delivers the foundational agent loop with tool support, multi-provider LLM support, and interactive CLI.
 
 **In scope:**
 - Core agent loop with stop_reason branching (text vs tool_use)
+- **Bash tool for command execution** (per original tutorial s01)
 - Multi-backend LLM provider support (Anthropic, OpenAI, Ollama)
 - REPL-style interactive CLI session
 - Error classification and retry logic
 - Structured logging and observability
 
 **Out of scope:**
-- Tool dispatch system (Phase 2)
-- File operations (Phase 2)
+- Additional tools beyond Bash (Phase 2)
+- File operations tools (Phase 2)
 - Task planning (Phase 3)
 - Context compression (Phase 6)
 - Session persistence (Phase 7)
@@ -34,6 +36,12 @@ LLM becomes an agent through core loop that processes responses until text outpu
 - API keys from environment variables: `ANTHROPIC_API_KEY`, `OPENAI_API_KEY`
 - Custom base URL via CLI flag `--base-url` or environment variables `ANTHROPIC_BASE_URL` / `OPENAI_BASE_URL`
 - Priority: CLI argument > environment variable > default
+
+### Tool Support
+- **Bash tool included in Phase 1** (per original tutorial s01)
+- Tool loop handled internally by rig-core's Agent
+- Tools added via AgentBuilder API
+- Default max_turns: 10 for multi-turn tool calling
 
 ### CLI Interaction Mode
 - REPL-style interactive session (not single-shot command)
@@ -55,7 +63,7 @@ LLM becomes an agent through core loop that processes responses until text outpu
 
 ### System Prompt
 - Minimal hardcoded system prompt for Phase 1
-- Tell the model it's an agent with loop capability
+- Tell the model it's an agent with bash tool capability
 - Full skill system deferred to Phase 5
 
 ### Session State

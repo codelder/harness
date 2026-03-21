@@ -46,8 +46,8 @@ where
 
 /// Core agent loop that processes LLM responses until text output
 ///
-/// This is the foundational agent pattern that transforms an LLM into an agent
-/// by processing responses and branching based on stop_reason.
+/// This is the foundational agent pattern that transforms an LLM into an agent.
+/// The tool loop is handled internally by rig-core's Agent when tools are configured.
 ///
 /// # Arguments
 /// * `messages` - Conversation history (modified in place)
@@ -57,13 +57,13 @@ where
 /// The final text response from the agent, or an error
 ///
 /// # Errors
-/// - AgentError::ToolsNotImplemented if model requests tool use (Phase 2 feature)
 /// - AgentError on provider failures
 ///
 /// # Note
 /// The provider parameter uses LlmProvider enum instead of &dyn Chat because
 /// rig-core's Chat trait is not object-safe (uses impl Trait in return types).
 /// System messages are handled via agent preamble in rig, so we skip them here.
+/// Tool calling is handled internally by rig-core's Agent with multi-turn support.
 pub async fn agent_loop(
     messages: &mut Vec<crate::agent::Message>,
     provider: &crate::llm::LlmProvider,
@@ -110,8 +110,7 @@ pub async fn agent_loop(
         // Add assistant message to history
         messages.push(crate::agent::Message::assistant(&response));
 
-        // For Phase 1, return the text response
-        // Phase 2 will add proper stop_reason handling with tool execution
+        // Return the text response (tool calling is handled internally by rig-core's Agent)
         return Ok(response);
     }
 }

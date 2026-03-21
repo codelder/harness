@@ -38,6 +38,7 @@ This roadmap transforms the 12-session learn-claude-code curriculum into a phase
   3. Agent can connect to at least one LLM provider (Anthropic, OpenAI, or Ollama)
   4. CLI can start interactive session with agent
   5. Errors are classified as retryable or non-retryable with appropriate handling
+  6. **Agent can execute bash commands via Bash tool** (per original tutorial s01)
 **Plans**: 4 plans in 4 waves
 
 Plans:
@@ -54,12 +55,11 @@ Plans:
 **Success Criteria** (what must be TRUE):
 
   1. Tool dispatch registry maps tool names to async handlers
-  2. Agent can execute bash commands and capture output
-  3. Agent can read, write, and edit files atomically
-  4. Agent can search codebase using glob and grep patterns
-  5. Agent can switch between multiple LLM backends (Anthropic, OpenAI, Ollama)
-  6. Destructive operations require interactive confirmation
-  7. MCP protocol support enables external tool integration
+  2. Agent can read, write, and edit files atomically
+  3. Agent can search codebase using glob and grep patterns
+  4. Agent can switch between multiple LLM backends (Anthropic, OpenAI, Ollama)
+  5. Destructive operations require interactive confirmation
+  6. MCP protocol support enables external tool integration
 **Plans**: TBD
 
 ### Phase 3: s03 - TodoWrite

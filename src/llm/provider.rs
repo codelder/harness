@@ -1,9 +1,23 @@
 use crate::error::ProviderError;
-use rig::agent::Agent;
+use crate::tools::BashTool;
+use rig::agent::{Agent, AgentBuilder};
 use rig::client::CompletionClient;
 use rig::completion::{Chat, Message, PromptError};
 use rig::providers::openai::responses_api::ResponsesCompletionModel;
 use rig::providers::{anthropic, openai};
+
+/// System prompt for the agent
+const SYSTEM_PROMPT: &str = r#"You are an AI agent with access to a bash tool for executing commands.
+
+You can use the bash tool to:
+- Run shell commands for file operations
+- Check system information
+- Execute scripts and programs
+
+Use the bash tool when you need to interact with the system, then provide your response based on the results."#;
+
+/// Maximum number of tool-calling turns before returning to the user
+const DEFAULT_MAX_TURNS: usize = 10;
 
 /// Supported LLM provider types
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -82,8 +96,6 @@ impl LlmProvider {
                 agent.chat(prompt.into(), history).await
             }
             LlmProvider::Ollama => {
-                // Placeholder - Ollama support not yet implemented in rig-core 0.31
-                // Using CompletionError variant for now
                 Err(PromptError::CompletionError(
                     rig::completion::CompletionError::ResponseError(
                         "Ollama provider not yet implemented".to_string()
@@ -161,7 +173,17 @@ pub fn create_provider(
 
             let client = builder.build()
                 .map_err(|e| ProviderError::RequestFailed(format!("Failed to build client: {}", e)))?;
-            let agent = client.agent(model).build();
+
+            // Create completion model
+            let completion_model = client.completion_model(model);
+
+            // Build agent with Bash tool using AgentBuilder
+            let agent = AgentBuilder::new(completion_model)
+                .preamble(SYSTEM_PROMPT)
+                .tool(BashTool)
+                .default_max_turns(DEFAULT_MAX_TURNS)
+                .build();
+
             Ok(LlmProvider::Anthropic(agent))
         }
         ProviderType::Openai => {
@@ -180,7 +202,17 @@ pub fn create_provider(
 
             let client = builder.build()
                 .map_err(|e| ProviderError::RequestFailed(format!("Failed to build client: {}", e)))?;
-            let agent = client.agent(model).build();
+
+            // Create completion model using Responses API (default for openai::Client)
+            let completion_model = client.completion_model(model);
+
+            // Build agent with Bash tool using AgentBuilder
+            let agent = AgentBuilder::new(completion_model)
+                .preamble(SYSTEM_PROMPT)
+                .tool(BashTool)
+                .default_max_turns(DEFAULT_MAX_TURNS)
+                .build();
+
             Ok(LlmProvider::Openai(agent))
         }
         ProviderType::Ollama => {
