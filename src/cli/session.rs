@@ -1,7 +1,7 @@
 use crate::agent::{agent_loop, Message};
 use crate::error::AgentError;
 use std::io::{self, BufRead, Write};
-use std::pin::pin;
+use tokio::signal::ctrl_c;
 
 /// Interactive REPL session
 pub struct Session {
@@ -30,7 +30,6 @@ impl Session {
         println!("Type your message and press Enter. Ctrl+C to exit.\n");
 
         let stdin = io::stdin();
-        let mut ctrl_c = pin!(tokio::signal::ctrl_c());
 
         loop {
             print!("You: ");
@@ -39,22 +38,17 @@ impl Session {
             let mut input = String::new();
 
             // Use tokio::select for Ctrl+C handling
+            // Note: ctrl_c() is called fresh each iteration to avoid Unpin issues
             tokio::select! {
-                _ = &mut ctrl_c => {
+                _ = ctrl_c() => {
                     self.print_summary();
                     return Ok(());
                 }
                 result = async {
-                    stdin.lock().read_line(&mut input)?;
-                    Ok::<_, io::Error>(input)
+                    let _ = stdin.lock().read_line(&mut input);
+                    input
                 } => {
-                    input = match result {
-                        Ok(s) => s,
-                        Err(e) => {
-                            eprintln!("Error reading input: {}", e);
-                            continue;
-                        }
-                    };
+                    input = result;
                 }
             }
 
