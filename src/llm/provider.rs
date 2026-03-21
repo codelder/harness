@@ -1,6 +1,6 @@
 use crate::error::ProviderError;
 use rig::agent::Agent;
-use rig::client::{CompletionClient, ProviderClient};
+use rig::client::CompletionClient;
 use rig::completion::{Chat, Message, PromptError};
 use rig::providers::openai::responses_api::ResponsesCompletionModel;
 use rig::providers::{anthropic, openai};
@@ -132,29 +132,54 @@ impl LlmProvider {
 /// # Arguments
 /// * `provider_type` - The provider type (Anthropic, Openai, Ollama)
 /// * `model` - The model identifier (provider-specific)
+/// * `base_url` - Optional custom base URL (for proxies or custom endpoints)
 ///
 /// # Returns
 /// An LlmProvider enum variant that can be used to interact with the LLM
 ///
 /// # Errors
 /// Returns ProviderError if the provider is unknown or API key is missing
-pub fn create_provider(provider_type: ProviderType, model: &str) -> Result<LlmProvider, ProviderError> {
+pub fn create_provider(
+    provider_type: ProviderType,
+    model: &str,
+    base_url: Option<&str>,
+) -> Result<LlmProvider, ProviderError> {
     match provider_type {
         ProviderType::Anthropic => {
-            // Check for API key before calling from_env() which panics if missing
-            std::env::var("ANTHROPIC_API_KEY")
+            // Check for API key before calling builder
+            let api_key = std::env::var("ANTHROPIC_API_KEY")
                 .map_err(|_| ProviderError::MissingApiKey("anthropic".to_string()))?;
 
-            let client = anthropic::Client::from_env();
+            let mut builder = anthropic::Client::builder().api_key(api_key);
+
+            // Check for base URL: CLI arg > ANTHROPIC_BASE_URL env
+            if let Some(url) = base_url {
+                builder = builder.base_url(url);
+            } else if let Ok(env_url) = std::env::var("ANTHROPIC_BASE_URL") {
+                builder = builder.base_url(&env_url);
+            }
+
+            let client = builder.build()
+                .map_err(|e| ProviderError::RequestFailed(format!("Failed to build client: {}", e)))?;
             let agent = client.agent(model).build();
             Ok(LlmProvider::Anthropic(agent))
         }
         ProviderType::Openai => {
-            // Check for API key before calling from_env() which panics if missing
-            std::env::var("OPENAI_API_KEY")
+            // Check for API key before calling builder
+            let api_key = std::env::var("OPENAI_API_KEY")
                 .map_err(|_| ProviderError::MissingApiKey("openai".to_string()))?;
 
-            let client = openai::Client::from_env();
+            let mut builder = openai::Client::builder().api_key(api_key);
+
+            // Check for base URL: CLI arg > OPENAI_BASE_URL env
+            if let Some(url) = base_url {
+                builder = builder.base_url(url);
+            } else if let Ok(env_url) = std::env::var("OPENAI_BASE_URL") {
+                builder = builder.base_url(&env_url);
+            }
+
+            let client = builder.build()
+                .map_err(|e| ProviderError::RequestFailed(format!("Failed to build client: {}", e)))?;
             let agent = client.agent(model).build();
             Ok(LlmProvider::Openai(agent))
         }

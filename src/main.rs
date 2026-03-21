@@ -41,7 +41,7 @@ async fn main() -> Result<()> {
     // Create and run session
     let mut session = Session::new();
 
-    if let Err(e) = session.run(provider_type, model).await {
+    if let Err(e) = session.run(provider_type, model, args.base_url.as_deref()).await {
         tracing::error!("Session error: {}", e);
         eprintln!("Error: {}", e);
         std::process::exit(1);

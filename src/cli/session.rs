@@ -22,8 +22,13 @@ impl Session {
     }
 
     /// Run the interactive REPL session
-    pub async fn run(&mut self, provider_type: crate::llm::ProviderType, model: &str) -> Result<(), AgentError> {
-        let provider = crate::llm::create_provider(provider_type, model)?;
+    pub async fn run(
+        &mut self,
+        provider_type: crate::llm::ProviderType,
+        model: &str,
+        base_url: Option<&str>,
+    ) -> Result<(), AgentError> {
+        let provider = crate::llm::create_provider(provider_type, model, base_url)?;
 
         println!("Agent Harness v0.1.0");
         println!("Provider: {} | Model: {}", provider_type, model);

@@ -14,6 +14,12 @@ pub struct Args {
     #[arg(short, long, default_value = "claude-3-5-sonnet-20241022")]
     pub model: String,
 
+    /// Base URL for the API (optional, for proxies or custom endpoints)
+    /// For Anthropic: can also set ANTHROPIC_BASE_URL env var
+    /// For OpenAI: can also set OPENAI_BASE_URL env var
+    #[arg(long)]
+    pub base_url: Option<String>,
+
     /// Verbosity level (-v for info, -vv for debug)
     #[arg(short, long, action = clap::ArgAction::Count)]
     pub verbose: u8,
@@ -56,6 +62,7 @@ mod tests {
         let args = Args {
             provider: Provider::Anthropic,
             model: "claude-3-5-sonnet".to_string(),
+            base_url: None,
             verbose: 0,
         };
         assert_eq!(args.tracing_level(), tracing::Level::WARN);
@@ -66,6 +73,7 @@ mod tests {
         let args = Args {
             provider: Provider::Anthropic,
             model: "claude-3-5-sonnet".to_string(),
+            base_url: None,
             verbose: 1,
         };
         assert_eq!(args.tracing_level(), tracing::Level::INFO);
@@ -76,6 +84,7 @@ mod tests {
         let args = Args {
             provider: Provider::Anthropic,
             model: "claude-3-5-sonnet".to_string(),
+            base_url: None,
             verbose: 2,
         };
         assert_eq!(args.tracing_level(), tracing::Level::DEBUG);
