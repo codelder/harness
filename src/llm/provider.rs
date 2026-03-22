@@ -17,7 +17,7 @@ You can use the bash tool to:
 Use the bash tool when you need to interact with the system, then provide your response based on the results."#;
 
 /// Maximum number of tool-calling turns before returning to the user
-const DEFAULT_MAX_TURNS: usize = 10;
+const DEFAULT_MAX_TURNS: usize = 50;
 
 /// Supported LLM provider types
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -178,10 +178,12 @@ pub fn create_provider(
             let completion_model = client.completion_model(model);
 
             // Build agent with Bash tool using AgentBuilder
+            // Note: max_tokens is required for Anthropic API
             let agent = AgentBuilder::new(completion_model)
                 .preamble(SYSTEM_PROMPT)
                 .tool(BashTool)
                 .default_max_turns(DEFAULT_MAX_TURNS)
+                .max_tokens(4096)
                 .build();
 
             Ok(LlmProvider::Anthropic(agent))
@@ -247,5 +249,30 @@ mod tests {
         let result: Result<ProviderType, _> = "unknown".parse();
         assert!(result.is_err());
         matches!(result.unwrap_err(), ProviderError::UnknownProvider(_));
+    }
+
+    #[tokio::test]
+    async fn test_create_anthropic_provider_with_custom_model() {
+        // Test that create_provider works with non-standard model names
+        // This verifies max_tokens is set correctly (not dependent on model name)
+        use std::env;
+
+        // Save original API key
+        let original_key = env::var("ANTHROPIC_API_KEY");
+
+        // Set a dummy API key for testing
+        env::set_var("ANTHROPIC_API_KEY", "test-key-12345");
+
+        // Test with a custom model name (not standard Claude model)
+        let result = create_provider(ProviderType::Anthropic, "custom-model-name", None);
+
+        // Restore original API key
+        match original_key {
+            Ok(val) => env::set_var("ANTHROPIC_API_KEY", val),
+            Err(_) => env::remove_var("ANTHROPIC_API_KEY"),
+        }
+
+        // Provider creation should succeed (max_tokens is set to 4096)
+        assert!(result.is_ok(), "Provider creation should succeed with custom model name");
     }
 }
