@@ -92,8 +92,8 @@ human_verification:
 | src/error/classify.rs | Error classification logic | VERIFIED | 7 variants, is_retryable() method |
 | src/llm/mod.rs | LLM module exports | VERIFIED | create_provider, LlmProvider, ProviderType |
 | src/llm/provider.rs | Multi-provider abstraction | VERIFIED | 195 lines, enum dispatch pattern |
-| src/agent/mod.rs | Agent module exports | VERIFIED | agent_loop, with_retry, Message, Role |
-| src/agent/message.rs | Message types | VERIFIED | Role enum, Message struct |
+| src/agent/mod.rs | Agent module exports | VERIFIED | agent_loop, with_retry, Message, Role, AgentTurn |
+| src/agent/message.rs | Message types | VERIFIED | Role enum, Message struct, AgentTurn struct |
 | src/agent/loop_.rs | Core agent loop | VERIFIED | 201 lines, with_retry + agent_loop |
 | src/cli/mod.rs | CLI module exports | VERIFIED | Args, Provider, Session |
 | src/cli/args.rs | CLI argument definitions | VERIFIED | 91 lines, clap::Parser |
@@ -106,7 +106,7 @@ human_verification:
 
 | From | To | Via | Status | Details |
 |------|-----|-----|--------|---------|
-| src/cli/session.rs | src/agent/loop_.rs | agent_loop | WIRED | Line 65: agent_loop(&mut self.messages, &provider) |
+| src/cli/session.rs | src/agent/loop_.rs | agent_loop | WIRED | Line 72: agent_loop(&self.messages, line, &provider) |
 | src/cli/session.rs | src/llm/provider.rs | create_provider | WIRED | Line 26: create_provider(provider_type, model) |
 | src/agent/loop_.rs | src/error/classify.rs | is_retryable | WIRED | Line 34: e.is_retryable() |
 | src/main.rs | tracing setup | setup_tracing | WIRED | Lines 6-14: registry with EnvFilter |

@@ -4,7 +4,7 @@ plan: 03
 subsystem: agent
 tags: [agent-loop, retry, message-types, core-orchestration]
 requires: [01-01, 01-02]
-provides: [agent_loop, with_retry, Message, Role]
+provides: [agent_loop, with_retry, Message, Role, AgentTurn]
 affects: [src/agent/, src/llm/provider.rs]
 tech_stack:
   added:
@@ -51,9 +51,9 @@ Core agent loop with message types, retry logic with exponential backoff, and LL
 
 Created the foundational agent module with:
 
-- **mod.rs**: Module declarations and re-exports for `agent_loop`, `with_retry`, `Message`, `Role`
-- **message.rs**: `Role` enum (System, User, Assistant) and `Message` struct with convenience constructors
-- **loop_.rs**: Core agent loop with retry logic
+- **mod.rs**: Module declarations and re-exports for `agent_loop`, `with_retry`, `Message`, `Role`, `AgentTurn`
+- **message.rs**: `Role` enum (System, User, Assistant) and `Message` struct with convenience constructors, `AgentTurn` struct
+- **loop_.rs**: Core agent loop with retry logic, uses `classify_prompt_error` for error classification
 
 ### 2. Message Types
 
@@ -90,12 +90,21 @@ pub async fn with_retry<T, F, Fut>(
 ### 4. Agent Loop
 
 ```rust
+pub struct AgentTurn {
+    pub user_input: String,
+    pub response: String,
+}
+
 pub async fn agent_loop(
-    messages: &mut Vec<Message>,
+    history: &[Message],
+    current_input: &str,
     provider: &LlmProvider,
-) -> Result<String, AgentError>
+) -> Result<AgentTurn, AgentError>
 ```
 
+- `history` is read-only; state management is the caller's responsibility
+- `current_input` is passed explicitly (no implicit extraction from history)
+- Returns structured `AgentTurn` for clean session state management
 - Converts harness `Message` types to `rig::completion::Message`
 - Handles system messages (skipped in history, handled via preamble)
 - Uses `with_retry` wrapper for LLM calls
@@ -112,6 +121,26 @@ pub async fn chat_with_history(
     chat_history: Vec<Message>,
 ) -> Result<String, PromptError>
 ```
+
+### 6. Error Classification
+
+Added `classify_prompt_error` function to properly classify rig-core errors:
+
+```rust
+pub fn classify_prompt_error(err: PromptError) -> AgentError
+```
+
+**HTTP Status Code Mapping:**
+
+| Status Code | AgentError | Retryable |
+|-------------|------------|-----------|
+| 408, 500, 502, 503, 504 | `Network` | ✅ Yes |
+| 429 | `RateLimited` | ✅ Yes |
+| 401, 403 | `Auth` | ❌ No |
+| 400, 404 | `InvalidRequest` | ❌ No |
+| 413 | `ContextLimit` | ❌ No |
+
+**Test Coverage:** 34 unit tests covering status code classification, retry-after extraction, and provider message classification.
 
 ## Deviations from Plan
 

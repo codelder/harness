@@ -42,6 +42,7 @@ LLM becomes an agent through core loop that processes responses until text outpu
 - Tool loop handled internally by rig-core's Agent
 - Tools added via AgentBuilder API
 - Default max_turns: 10 for multi-turn tool calling
+- **max_tokens: 4096** for Anthropic provider (required for non-standard models)
 
 ### CLI Interaction Mode
 - REPL-style interactive session (not single-shot command)
@@ -60,6 +61,15 @@ LLM becomes an agent through core loop that processes responses until text outpu
 - Stream LLM output in real-time (not wait for complete response)
 - Default silent logging, `-v` for info level, `-vv` for debug
 - Structured tracing via tracing-subscriber
+- **Log files:**
+  - `~/.harness/harness.log` — General application logs
+  - `~/.harness/llm.log` — LLM interaction logs (only when trace enabled)
+- **Enable trace logging:** `RUST_LOG=trace` environment variable
+- LLM logs include:
+  - `LLM REQUEST` — Input messages and prompt sent to LLM
+  - `LLM RESPONSE` — Response content and length
+  - `TOOL CALL` — Tool name, arguments, and timeout
+  - `TOOL RESULT` — Tool output, exit code, and preview
 
 ### System Prompt
 - Minimal hardcoded system prompt for Phase 1
