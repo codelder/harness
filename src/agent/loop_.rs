@@ -1,4 +1,5 @@
-use crate::error::AgentError;
+use super::{AgentTurn, Message, Role};
+use crate::error::{classify_prompt_error, AgentError};
 use std::time::Duration;
 use tokio::time::sleep;
 
@@ -50,11 +51,12 @@ where
 /// The tool loop is handled internally by rig-core's Agent when tools are configured.
 ///
 /// # Arguments
-/// * `messages` - Conversation history (modified in place)
+/// * `history` - Conversation history (read-only, not modified)
+/// * `current_input` - The user's current input
 /// * `provider` - LLM provider to use for chat completions
 ///
 /// # Returns
-/// The final text response from the agent, or an error
+/// An `AgentTurn` containing the user input and agent response, or an error
 ///
 /// # Errors
 /// - AgentError on provider failures
@@ -65,53 +67,40 @@ where
 /// System messages are handled via agent preamble in rig, so we skip them here.
 /// Tool calling is handled internally by rig-core's Agent with multi-turn support.
 pub async fn agent_loop(
-    messages: &mut Vec<crate::agent::Message>,
+    history: &[Message],
+    current_input: &str,
     provider: &crate::llm::LlmProvider,
-) -> Result<String, AgentError> {
+) -> Result<AgentTurn, AgentError> {
     loop {
-        // Convert our Message type to rig's Message type
-        // Note: rig::completion::Message only has User and Assistant variants
-        // System messages are handled via agent preamble in rig
-        let rig_messages: Vec<rig::completion::Message> = messages
+        // Convert history to rig's Message type for chat history
+        // Note: chat_history should NOT include the current input,
+        // because it will be passed separately as the prompt parameter
+        let rig_messages: Vec<rig::completion::Message> = history
             .iter()
             .filter_map(|m| match m.role {
-                crate::agent::Role::User => Some(rig::completion::Message::user(&m.content)),
-                crate::agent::Role::Assistant => Some(rig::completion::Message::assistant(&m.content)),
-                crate::agent::Role::System => {
+                Role::User => Some(rig::completion::Message::user(&m.content)),
+                Role::Assistant => Some(rig::completion::Message::assistant(&m.content)),
+                Role::System => {
                     // System messages are handled via agent preamble in rig
-                    // Skip them in the message history
                     None
                 }
             })
             .collect();
 
-        // Get the last user message as the prompt
-        let prompt = messages
-            .iter()
-            .rev()
-            .find(|m| m.role == crate::agent::Role::User)
-            .map(|m| m.content.clone())
-            .unwrap_or_default();
-
         // Call LLM with retry logic
         let response = with_retry(MAX_RETRIES, || async {
-            provider.chat_with_history(prompt.clone(), rig_messages.clone())
+            provider
+                .chat_with_history(current_input.to_string(), rig_messages.clone())
                 .await
-                .map_err(|e| {
-                    // Convert PromptError to AgentError
-                    AgentError::Provider(crate::error::ProviderError::RequestFailed(e.to_string()))
-                })
+                .map_err(classify_prompt_error)
         })
         .await?;
 
-        // Print the response for visibility
-        println!("{}", response);
-
-        // Add assistant message to history
-        messages.push(crate::agent::Message::assistant(&response));
-
-        // Return the text response (tool calling is handled internally by rig-core's Agent)
-        return Ok(response);
+        // Return the structured turn result
+        return Ok(AgentTurn {
+            user_input: current_input.to_string(),
+            response,
+        });
     }
 }
 

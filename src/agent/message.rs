@@ -1,5 +1,22 @@
 use serde::{Deserialize, Serialize};
 
+/// Result of a single agent turn (user input + agent response)
+///
+/// This struct represents one complete turn of conversation with the agent.
+/// It captures both the user's input and the agent's response, making it
+/// easy for the session layer to commit the turn to history on success.
+///
+/// Future extensions (Phase 02+) may include:
+/// - tool_calls: Vec<ToolCall>
+/// - tool_results: Vec<ToolResult>
+#[derive(Debug, Clone)]
+pub struct AgentTurn {
+    /// The user's input for this turn
+    pub user_input: String,
+    /// The agent's text response
+    pub response: String,
+}
+
 /// Conversation role
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub enum Role {
