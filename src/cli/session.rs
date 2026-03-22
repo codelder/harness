@@ -1,7 +1,8 @@
 use crate::agent::{agent_loop, Message};
 use crate::error::AgentError;
-use std::io::{self, BufRead, Write};
-use tokio::signal::ctrl_c;
+use reedline::{DefaultPrompt, DefaultPromptSegment, Reedline, Signal};
+use std::io::Write;
+use tracing::{debug, error, info, warn};
 
 /// Interactive REPL session
 pub struct Session {
@@ -29,58 +30,90 @@ impl Session {
         base_url: Option<&str>,
     ) -> Result<(), AgentError> {
         let provider = crate::llm::create_provider(provider_type, model, base_url)?;
+        info!(provider = ?provider_type, model = model, "Session initialized");
 
         println!("Agent Harness v0.1.0");
         println!("Provider: {} | Model: {}", provider_type, model);
-        println!("Type your message and press Enter. Ctrl+C to exit.\n");
+        println!("Type your message and press Enter. Ctrl+C or Ctrl+D to exit.\n");
 
-        let stdin = io::stdin();
+        let prompt = DefaultPrompt::new(
+            DefaultPromptSegment::Basic("You".to_string()),
+            DefaultPromptSegment::Empty,
+        );
 
         loop {
-            print!("You: ");
-            io::stdout().flush().unwrap();
+            debug!("Waiting for user input");
+            let prompt = prompt.clone();
+            let result = tokio::task::spawn_blocking(move || {
+                Reedline::create().read_line(&prompt)
+            })
+            .await;
 
-            let mut input = String::new();
+            match result {
+                Ok(Ok(Signal::Success(line))) => {
+                    let line = line.trim();
+                    if line.is_empty() {
+                        continue;
+                    }
 
-            // Use tokio::select for Ctrl+C handling
-            // Note: ctrl_c() is called fresh each iteration to avoid Unpin issues
-            tokio::select! {
-                _ = ctrl_c() => {
+                    // Check for exit commands
+                    if line == "exit" || line == "quit" {
+                        info!("User requested exit via command");
+                        self.print_summary();
+                        return Ok(());
+                    }
+
+                    info!(input = line, "User input received");
+
+                    print!("Agent: ");
+                    std::io::stdout().flush().unwrap();
+
+                    match agent_loop(&self.messages, line, &provider).await {
+                        Ok(turn) => {
+                            debug!(response_len = turn.response.len(), "Agent response received");
+                            println!("{}", turn.response);
+                            // Commit the turn to history only on success
+                            self.messages.push(Message::user(&turn.user_input));
+                            self.messages.push(Message::assistant(&turn.response));
+                            self.turn_count += 1;
+                        }
+                        Err(AgentError::ToolsNotImplemented) => {
+                            warn!("Tool use requested but not implemented");
+                            eprintln!("\nError: Tool use requested but not implemented (Phase 2 feature)");
+                        }
+                        Err(e) => {
+                            error!(error = %e, "Agent loop error");
+                            eprintln!("\nError: {}", e);
+                        }
+                    }
+                }
+                Ok(Ok(Signal::CtrlC)) => {
+                    info!("User pressed Ctrl+C, exiting");
                     self.print_summary();
                     return Ok(());
                 }
-                result = async {
-                    let _ = stdin.lock().read_line(&mut input);
-                    input
-                } => {
-                    input = result;
+                Ok(Ok(Signal::CtrlD)) => {
+                    info!("User pressed Ctrl+D, exiting");
+                    self.print_summary();
+                    return Ok(());
                 }
-            }
+                Ok(Err(err)) => {
+                    error!(error = %err, "Reedline error");
+                    eprintln!("\nTerminal error: {}", err);
+                    eprintln!("This may be a terminal compatibility issue. Trying to continue...\n");
 
-            let input = input.trim();
-            if input.is_empty() {
-                continue;
-            }
-
-            // Add user message
-            self.messages.push(Message::user(input));
-
-            // Run agent loop
-            print!("Agent: ");
-            match agent_loop(&mut self.messages, &provider).await {
-                Ok(response) => {
-                    println!("{}", response);
-                    self.turn_count += 1;
+                    if err.to_string().contains("cursor position") {
+                        std::thread::sleep(std::time::Duration::from_millis(100));
+                    }
+                    continue;
                 }
-                Err(AgentError::ToolsNotImplemented) => {
-                    eprintln!("\nError: Tool use requested but not implemented (Phase 2 feature)");
-                    // Remove the failed message exchange
-                    self.messages.pop();
-                }
-                Err(e) => {
-                    eprintln!("\nError: {}", e);
-                    // Remove the failed message exchange
-                    self.messages.pop();
+                Err(err) => {
+                    error!(error = %err, "spawn_blocking join error");
+                    eprintln!("Error: {}", err);
+                    self.print_summary();
+                    return Err(AgentError::Provider(crate::error::ProviderError::RequestFailed(
+                        err.to_string(),
+                    )));
                 }
             }
         }
@@ -88,7 +121,7 @@ impl Session {
 
     /// Print session summary on exit
     fn print_summary(&self) {
-        println!("\n\nSession Summary:");
+        println!("\nSession Summary:");
         println!("  Turns: {}", self.turn_count);
         println!("  Messages: {}", self.messages.len());
     }
@@ -107,7 +140,7 @@ mod tests {
     #[test]
     fn test_session_initialization() {
         let session = Session::new();
-        assert_eq!(session.messages.len(), 1); // System message
+        assert_eq!(session.messages.len(), 1);
         assert_eq!(session.turn_count, 0);
     }
 
