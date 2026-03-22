@@ -3,18 +3,17 @@
 **Defined:** 2025-03-20
 **Core Value:** Performance and safety without sacrificing capability
 
-## v1 Requirements
+## Archived Requirements
 
-Requirements for initial release. Each maps to roadmap phases.
+Requirements completed in shipped milestones.
 
-### Phase 1: s01 - Agent Loop
+### v0.1 Foundation (Phase 1) — Shipped 2026-03-22
 
-- [x] **CORE-01**: Agent loop with stop_reason handling — while loop that processes tool_use until text response (partial: basic loop with retry logic, tool handling in Phase 2)
-- [x] **CORE-05**: Multi-backend LLM provider — abstract trait for Anthropic, OpenAI, Ollama/local (partial: basic provider support)
-- [x] **CORE-06**: CLI interface with clap — argument parsing and interactive mode
-- [x] **CROSS-02**: Error classification (retryable vs non-retryable) — proper error handling per provider
-- [x] **CROSS-03**: Graceful degradation when providers fail — fallback logic with user notification
-- [x] **CROSS-04**: Structured logging and observability — tracing/tracing-subscriber for diagnostics
+All Phase 1 requirements archived. See [v0.1-REQUIREMENTS.md](milestones/v0.1-REQUIREMENTS.md)
+
+## v0.2 Requirements (In Progress)
+
+Requirements for next milestone. Each maps to roadmap phases.
 
 ### Phase 2: s02 - Tool Use
 
@@ -108,12 +107,12 @@ Which phases cover which requirements. Updated during roadmap creation.
 
 | Requirement | Phase | Status |
 | ----------- | ----- | ------ |
-| CORE-01 | Phase 1 | Complete |
-| CORE-05 (partial) | Phase 1 | Complete |
-| CORE-06 | Phase 1 | Complete |
-| CROSS-02 | Phase 1 | Complete |
-| CROSS-03 | Phase 1 | Complete |
-| CROSS-04 | Phase 1 | Complete |
+| ~~CORE-01~~ | ~~Phase 1~~ | ✅ Archived (v0.1) |
+| ~~CORE-05 (partial)~~ | ~~Phase 1~~ | ✅ Archived (v0.1) |
+| ~~CORE-06~~ | ~~Phase 1~~ | ✅ Archived (v0.1) |
+| ~~CROSS-02~~ | ~~Phase 1~~ | ✅ Archived (v0.1) |
+| ~~CROSS-03~~ | ~~Phase 1~~ | ✅ Archived (v0.1) |
+| ~~CROSS-04~~ | ~~Phase 1~~ | ✅ Archived (v0.1) |
 | CORE-02 | Phase 2 | Pending |
 | CORE-03 | Phase 2 | Pending |
 | CORE-04 | Phase 2 | Pending |
@@ -138,10 +137,9 @@ Which phases cover which requirements. Updated during roadmap creation.
 
 **Coverage:**
 
-- v1 requirements: 25 total (counting partial implementations separately)
-- Phase mappings: 25
-- Unmapped: 0 ✓
+- v0.1 requirements: 6 (archived)
+- v0.2 requirements: 19 (pending)
 
 ---
 *Requirements defined: 2025-03-20*
-*Last updated: 2026-03-21 after Phase 1 completion*
+*Last updated: 2026-03-22 after v0.1 milestone archive*

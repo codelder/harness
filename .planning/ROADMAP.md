@@ -1,8 +1,11 @@
 # Roadmap: Rust Agent Harness
 
-## Overview
+## Milestones
 
-This roadmap transforms the 12-session learn-claude-code curriculum into a phased delivery plan, building a production-ready Rust agent harness from the core loop to multi-agent teams. Each phase corresponds to one curriculum session (s01-s12), delivering incremental capabilities that compound into a complete agent infrastructure.
+- ✅ **v0.1 Foundation** — Phase 1 (shipped 2026-03-22)
+- 🚧 **v0.2 Tool Use** — Phases 2-4 (in progress)
+- 📋 **v1.0 Core** — Phases 5-8 (planned)
+- 📋 **v2.0 Teams** — Phases 9-12 (planned)
 
 ## Phases
 
@@ -11,14 +14,32 @@ This roadmap transforms the 12-session learn-claude-code curriculum into a phase
 - Integer phases (1-12): Planned milestone work aligned with curriculum sessions
 - Decimal phases (2.1, 2.2): Urgent insertions (marked with INSERTED)
 
-- [x] **Phase 1: s01 - Agent Loop** - Core agent loop with stop_reason handling
+<details>
+<summary>✅ v0.1 Foundation (Phase 1) — SHIPPED 2026-03-22</summary>
+
+- [x] **Phase 1: s01 - Agent Loop** — Core agent loop with stop_reason handling (4/4 plans)
+
+**Key deliverables:** Agent loop, multi-provider support, error classification, CLI interface
+
+See: [v0.1-ROADMAP.md](milestones/v0.1-ROADMAP.md)
+
+</details>
+
+### 🚧 v0.2 Tool Use (In Progress)
+
 - [ ] **Phase 2: s02 - Tool Use** - Tool dispatch system and basic file/shell tools
 - [ ] **Phase 3: s03 - TodoWrite** - Task planning with nag reminders
 - [ ] **Phase 4: s04 - Subagents** - Subagent spawning with isolated context
+
+### 📋 v1.0 Core (Planned)
+
 - [ ] **Phase 5: s05 - Skills** - On-demand skill loading via tool_result
 - [ ] **Phase 6: s06 - Context Compact** - Three-layer context compression
 - [ ] **Phase 7: s07 - Tasks** - File-based task graph with dependencies
 - [ ] **Phase 8: s08 - Background Tasks** - Background execution and notifications
+
+### 📋 v2.0 Teams (Planned)
+
 - [ ] **Phase 9: s09 - Agent Teams** - Multi-agent teams with JSONL mailboxes
 - [ ] **Phase 10: s10 - Team Protocols** - Structured team communication patterns
 - [ ] **Phase 11: s11 - Autonomous Agents** - Idle agents claim available tasks

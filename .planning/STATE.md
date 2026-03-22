@@ -1,10 +1,10 @@
 ---
 gsd_state_version: 1.0
-milestone: v1.0
-milestone_name: milestone
-status: phase-complete
-stopped_at: Completed 01-04-PLAN.md
-last_updated: "2026-03-21T00:03:36Z"
+milestone: v0.2
+milestone_name: tool-use
+status: ready
+stopped_at: v0.1 Foundation archived
+last_updated: "2026-03-22T21:45:00Z"
 progress:
   total_phases: 12
   completed_phases: 1
@@ -21,10 +21,17 @@ See: .planning/PROJECT.md (updated 2025-03-20)
 **Core value:** Performance and safety without sacrificing capability
 **Current focus:** Phase 02 — s02-tool-dispatch (ready to start)
 
+## Milestone History
+
+| Milestone | Status | Phases | Date |
+|-----------|--------|--------|------|
+| v0.1 Foundation | ✅ Shipped | 1 | 2026-03-22 |
+| v0.2 Tool Use | 🚧 In Progress | 2-4 | - |
+
 ## Current Position
 
-Phase: 01 (s01-agent-loop) — COMPLETE
-Plan: 4 of 4 (phase finished)
+**Phase:** Ready to start Phase 2 (s02-tool-dispatch)
+**Next step:** `/gsd:discuss-phase 2` or `/gsd:plan-phase 2`
 
 ## Performance Metrics
 
@@ -32,20 +39,18 @@ Plan: 4 of 4 (phase finished)
 
 - Total plans completed: 4
 - Average duration: 120 min
-- Total execution time: 8 hours 3 min
+- Total execution time: 8 hours
 
 **By Phase:**
 
-| Phase | Plans | Total | Avg/Plan |
-|-------|-------|-------|----------|
-| s01-agent-loop | 4 | 4 | 120 min |
+| Phase | Plans | Status |
+|-------|-------|--------|
+| s01-agent-loop | 4 | ✅ Complete (v0.1) |
 
 **Recent Trend:**
 
 - Last 5 plans: [01-01 (5 min), 01-02 (7 hours), 01-03 (45 min), 01-04 (3 min)]
 - Trend: Accelerating after foundation work
-
-Updated after each plan completion
 
 ## Accumulated Context
 
@@ -70,14 +75,14 @@ Recent decisions affecting current work:
 
 ### Pending Todos
 
-None yet.
+None.
 
 ### Blockers/Concerns
 
-None yet.
+None.
 
 ## Session Continuity
 
-Last session: 2026-03-21T00:03:36Z
-Stopped at: Completed 01-04-PLAN.md (Phase 01 complete)
-Resume file: .planning/phases/02-s02-tool-dispatch/02-01-PLAN.md
+Last session: 2026-03-22T21:45:00Z
+Action: v0.1 Foundation archived
+Resume: `/gsd:plan-phase 2` to start Tool Use phase
