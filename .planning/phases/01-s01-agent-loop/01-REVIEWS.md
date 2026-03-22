@@ -11,7 +11,7 @@ plans_reviewed:
 
 # Plan Review - Phase 1
 
-## Codex Review
+## Codex Review #1 (2026-03-22)
 
 ### Summary
 
@@ -26,43 +26,88 @@ The Phase 1 plan set has a good overall wave structure and a clear separation be
 
 ### Concerns
 
-- HIGH: Phase 1 requires Bash tool execution, but none of the four plans allocates work for a Bash tool or tool registration. The phase contract explicitly includes Bash tool support in [.planning/ROADMAP.md](../../ROADMAP.md), lines 57-63, and [.planning/phases/01-s01-agent-loop/01-CONTEXT.md](./01-CONTEXT.md), lines 12-18 and 40-46. The plan objectives in [01-03-PLAN.md](./01-03-PLAN.md) and [01-04-PLAN.md](./01-04-PLAN.md) only cover provider access, agent loop, and CLI, so Phase 1 can complete "successfully" while still missing a required user-visible capability.
-- HIGH: The provider API is internally inconsistent across plans. [01-02-PLAN.md](./01-02-PLAN.md), lines 212-226 defines `LlmProvider = Box<dyn Chat>` and `create_provider(provider_type, model)`, but its own acceptance criteria in lines 286-288 require `create_provider(provider_type, model, base_url)` and enum dispatch instead of `Box<dyn Chat>`. [01-04-PLAN.md](./01-04-PLAN.md), lines 353-355 then calls the two-argument version in `Session::run`, while lines 461-464 and 552 require `base_url` plumbing. This is a design contract mismatch, not just an implementation detail.
-- HIGH: The Ollama path is specified as an API-key-backed OpenRouter client instead of a local provider flow. [01-02-PLAN.md](./01-02-PLAN.md), lines 238-242 maps Ollama through `rig::providers::openrouter::Client::from_env()` and converts failures into `MissingApiKey("ollama: ...")`, while the phase context only requires API keys for Anthropic and OpenAI and treats Ollama as a local backend. That would misconfigure one of the three advertised providers and push the implementation toward the wrong operational model.
-- MEDIUM: The module naming instructions for the agent loop are self-contradictory. [01-03-PLAN.md](./01-03-PLAN.md), lines 187-193 declares `mod loop_rs;`, but line 272 says the file "MUST be named `loop.rs` (not `loop_rs.rs`)". Without an explicit `#[path = "loop.rs"]` attribute, those instructions cannot both be true.
-- MEDIUM: The test plan does not verify the most important Phase 1 behavior. [01-03-PLAN.md](./01-03-PLAN.md), lines 483-488 says Task 3 should test `EndTurn`, `ToolUse`, `MaxTokens`, and streaming behavior, but Task 4 in lines 637-689 explicitly avoids mocking providers and only compiles against the `agent_loop` signature. That leaves stop-reason branching, streaming semantics, and message-history mutation effectively untested despite being core phase claims.
-- MEDIUM: The streaming implementation requires a dependency change that is not actually planned. [01-03-PLAN.md](./01-03-PLAN.md), lines 492 and 604 require `futures::StreamExt` and even note "Add futures crate dependency if not already present", but the task's writable files only include `src/agent/loop.rs` and the Phase 1 dependency plan in [01-01-PLAN.md](./01-01-PLAN.md), lines 119-133 does not add `futures`. That creates a hidden cross-plan edit that the executor is not formally authorized to make.
+- HIGH: Phase 1 requires Bash tool execution, but none of the four plans allocates work for a Bash tool or tool registration.
+- HIGH: The provider API is internally inconsistent across plans (Box<dyn Chat> vs enum dispatch, base_url parameter drift).
+- HIGH: The Ollama path is specified as an API-key-backed OpenRouter client instead of a local provider flow.
+- MEDIUM: The module naming instructions are self-contradictory (mod loop_rs vs file must be loop.rs).
+- MEDIUM: The test plan does not verify the most important Phase 1 behavior (stop-reason branching, streaming).
+- MEDIUM: The streaming implementation requires a dependency change that is not actually planned.
 
 ### Suggestions
 
-- Add a dedicated Phase 1 task for Bash tool definition, registration, and the minimal `tool_use -> execute -> append result` loop, or explicitly move that roadmap criterion out of Phase 1.
-- Normalize the provider contract once, then propagate it everywhere: choose either enum dispatch or trait objects, and decide whether `base_url` is part of `create_provider` before execution begins.
-- Rewrite the Ollama section around a local endpoint configuration instead of an API-key error path.
-- Fix the agent loop module naming so the file path, module declaration, and acceptance criteria all agree.
-- Introduce a mock or fake provider abstraction for Phase 1 tests so stop reasons and streamed deltas can be tested deterministically.
-- If streaming needs `futures`, add that dependency in the plan explicitly; otherwise switch the implementation and examples to `tokio_stream` or the exact trait already in the dependency set.
+- Add a dedicated Phase 1 task for Bash tool or move that requirement out of Phase 1.
+- Normalize the provider contract once, then propagate it everywhere.
+- Rewrite the Ollama section around a local endpoint configuration.
+- Introduce a mock or fake provider abstraction for tests.
 
 ### Risk Assessment
 
-HIGH. The overall architecture is viable, but the current plans contain enough contract drift that a straightforward executor would likely either implement the wrong interfaces or need to improvise around contradictory instructions. The largest risk is silent scope miss: the plans can all "pass" while still failing the Bash-tool requirement that defines the phase boundary.
+HIGH. The overall architecture is viable, but the current plans contain enough contract drift that a straightforward executor would likely either implement the wrong interfaces or need to improvise around contradictory instructions.
+
+---
+
+## Codex Review #2 (2026-03-22)
+
+### Summary
+
+Phase 1 planning is strong on decomposition and traceability, but weak on contract consistency. Rating: **good plan structure, high execution risk**. The four-wave split is sensible and each plan has clear objectives, dependencies, artifacts, and verification hooks.
+
+### Strengths
+
+- Clear decomposition across 4 waves with explicit dependencies
+- Strong traceability from tasks to requirements and artifacts
+- Non-functional concerns (error handling, retry, logging) addressed explicitly
+- Good research foundation for implementation patterns
+
+### Concerns
+
+- HIGH: Phase boundary is inconsistent - ROADMAP requires Bash tool execution but loop plan treats tool use as unimplemented
+- HIGH: Provider API drifts across plans - `create_provider` signature varies between 2 and 3 args
+- HIGH: Ollama modeled incorrectly as API-key/OpenRouter flow instead of local provider
+- MEDIUM: Core behavior under-tested - stop-reason branching and streaming lack deterministic tests
+- MEDIUM: REPL plan uses blocking stdin inside `tokio::select!` which may break Ctrl+C handling
+- MEDIUM: Output duplication - `agent_loop` streams text, then `Session::run` prints again
+- MEDIUM: Message history cleanup inconsistent on ToolUse errors
+- MEDIUM: Hidden contradictions - `loop_rs` vs `loop.rs`, `futures::StreamExt` vs `tokio-stream`, `unwrap()` in library code
+
+### Suggestions
+
+1. Resolve the phase contract first - add minimal Bash/tool handling or move criterion
+2. Freeze one provider contract before execution
+3. Add fake provider abstraction for deterministic testing
+4. Rework REPL plan to use async stdin or `spawn_blocking`
+
+### Risk Assessment
+
+HIGH. Good decomposition but high execution risk due to contract drift and missing test coverage.
 
 ---
 
 ## Consensus Summary
 
-Only one reviewer was used for this pass, so there is no true cross-reviewer consensus. The dominant concerns from this review are:
-
 ### Agreed Strengths
 
-- Phase decomposition and wave ordering are appropriate.
-- Requirements, artifacts, and verification intent are documented clearly.
+- Phase decomposition and wave ordering are appropriate (4 waves with clear dependencies)
+- Requirements, artifacts, and verification intent are documented clearly
+- Error handling, retry, and observability are first-class concerns
+- Good research foundation with clear implementation patterns
 
 ### Agreed Concerns
 
-- The phase scope includes Bash tool execution, but the plan set does not schedule it.
-- Provider interfaces drift across plans and would force rework.
-- Core stop-reason and streaming behavior is under-tested.
+- **Phase scope mismatch**: Phase 1 ROADMAP requires Bash tool execution, but plans defer to Phase 2
+- **Provider contract drift**: API signature varies across plans (2-arg vs 3-arg, Box<dyn Chat> vs enum)
+- **Ollama misconfiguration**: Planned as OpenRouter/API-key instead of local provider
+- **Under-tested core behavior**: Stop-reason branching and streaming lack deterministic tests
+- **REPL blocking issues**: stdin handling may break async Ctrl+C behavior
 
 ### Divergent Views
 
-- Not applicable for a single-reviewer pass.
+Both reviews agree on all major concerns. No significant divergence.
+
+### Priority Actions
+
+1. **Clarify Phase 1 scope**: Decide if Bash tool is in Phase 1 or Phase 2
+2. **Freeze provider contract**: Single API signature across all plans
+3. **Fix Ollama configuration**: Local endpoint, not API-key based
+4. **Add fake provider**: Enable deterministic testing of stop-reason and streaming
+5. **Fix REPL I/O**: Use async stdin or spawn_blocking for proper Ctrl+C handling
