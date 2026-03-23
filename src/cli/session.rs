@@ -110,8 +110,8 @@ impl Session {
                             // Build the response with optional nag reminder
                             // Per Python reference: inject reminder into response for model visibility
                             let response = if self.rounds_since_todo >= 3 {
-                                let has_todos = self.todo_manager.lock().await;
-                                if !has_todos.is_empty() {
+                                let manager = self.todo_manager.lock().await;
+                                if !manager.is_empty() {
                                     format!(
                                         "<reminder>You have pending todos. Use the 'todo' tool to update your task list.</reminder>\n\n{}",
                                         turn.response
