@@ -200,8 +200,10 @@ pub fn create_provider(
             // Enable extended thinking if requested
             if thinking {
                 let thinking_config = serde_json::json!({
-                    "type": "enabled",
-                    "budget_tokens": thinking_budget
+                    "thinking": {
+                        "type": "enabled",
+                        "budget_tokens": thinking_budget
+                    }
                 });
                 agent_builder = agent_builder.additional_params(thinking_config);
             }
