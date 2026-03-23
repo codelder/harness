@@ -127,6 +127,7 @@ where
 /// * `history` - Conversation history (read-only, not modified)
 /// * `current_input` - The user's current input
 /// * `provider` - LLM provider to use for chat completions
+/// * `hook` - Hook for observing tool calls (e.g., TodoUsageHook)
 ///
 /// # Returns
 /// An `AgentTurn` containing the user input and agent response, or an error
@@ -143,6 +144,7 @@ pub async fn agent_loop(
     history: &[Message],
     current_input: &str,
     provider: &crate::llm::LlmProvider,
+    hook: TodoUsageHook,
 ) -> Result<AgentTurn, AgentError> {
     loop {
         // Convert history to rig's Message type for chat history
@@ -160,12 +162,15 @@ pub async fn agent_loop(
             })
             .collect();
 
-        // Call LLM with retry logic
-        let response = with_retry(MAX_RETRIES, || async {
-            provider
-                .chat_with_history(current_input.to_string(), rig_messages.clone())
-                .await
-                .map_err(classify_prompt_error)
+        // Call LLM with retry logic using hook-enabled chat
+        let response = with_retry(MAX_RETRIES, || {
+            let hook_clone = hook.clone();
+            async {
+                provider
+                    .chat_with_history_and_hook(current_input.to_string(), rig_messages.clone(), hook_clone)
+                    .await
+                    .map_err(classify_prompt_error)
+            }
         })
         .await?;
 
