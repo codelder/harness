@@ -35,7 +35,13 @@ See: [v0.2-ROADMAP.md](milestones/v0.2-ROADMAP.md)
 
 ### 🚧 v0.3 TodoWrite (In Progress)
 
-- [ ] **Phase 3: s03 - TodoWrite** — Task planning with nag reminders
+- [ ] **Phase 3: s03 - TodoWrite** — Task planning with nag reminders (0/4 plans)
+
+Plans:
+- [ ] 03-01-PLAN.md — TodoManager core state management with constraint validation
+- [ ] 03-02-PLAN.md — TodoTool with Arc<Mutex<TodoManager>> for shared state
+- [ ] 03-03-PLAN.md — Session integration with nag reminder
+- [ ] 03-04-PLAN.md — Provider wiring and round counter reset
 
 ### 📋 v0.4 Subagents (Planned)
 
@@ -72,7 +78,8 @@ See: [v0.2-ROADMAP.md](milestones/v0.2-ROADMAP.md)
   5. Only one task can be in_progress at a time (enforced constraint)
   6. Maximum 20 todos enforced (prevents context explosion)
   7. TodoTool returns formatted string via render() method
-**Plans**: TBD
+
+**Plans**: 4 plans in 3 waves
 
 ### Phase 4: s04 - Subagents
 
@@ -197,7 +204,7 @@ See: [v0.2-ROADMAP.md](milestones/v0.2-ROADMAP.md)
 |-------|-----------|----------------|--------|-----------|
 | 1. s01 - Agent Loop | v0.1 | 4/4 | Complete | 2026-03-21 |
 | 2. s02 - Tool Use | v0.2 | 3/3 | Complete | 2026-03-23 |
-| 3. s03 - TodoWrite | v0.3 | 0/TBD | Not started | - |
+| 3. s03 - TodoWrite | v0.3 | 0/4 | Planning | - |
 | 4. s04 - Subagents | v0.4 | 0/TBD | Not started | - |
 | 5. s05 - Skills | v1.0 | 0/TBD | Not started | - |
 | 6. s06 - Context Compact | v1.0 | 0/TBD | Not started | - |
