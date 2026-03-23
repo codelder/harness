@@ -1,12 +1,12 @@
 ---
 gsd_state_version: 1.0
 milestone: v0.3
-milestone_name: Advanced Features
-status: Planning next milestone
-last_updated: "2026-03-23T21:45:00Z"
+milestone_name: TodoWrite
+status: Requirements definition
+last_updated: "2026-03-23T22:30:00Z"
 last_activity: 2026-03-23
 progress:
-  total_phases: 4
+  total_phases: 3
   completed_phases: 2
   total_plans: 7
   completed_plans: 7
@@ -19,7 +19,7 @@ progress:
 See: .planning/PROJECT.md (updated 2026-03-23)
 
 **Core value:** Performance and safety without sacrificing capability
-**Current focus:** Planning v0.3 milestone (Phases 3-4)
+**Current focus:** v0.3 TodoWrite milestone (Phase 3)
 
 ## Milestone History
 
@@ -27,7 +27,7 @@ See: .planning/PROJECT.md (updated 2026-03-23)
 |-----------|--------|--------|------|
 | v0.1 Foundation | ✅ Shipped | 1 | 2026-03-22 |
 | v0.2 Tool Use | ✅ Shipped | 2 | 2026-03-23 |
-| v0.3 Advanced Features | 📋 Planned | 3-4 | - |
+| v0.3 TodoWrite | 🚧 In Progress | 3 | - |
 
 ## Current Position
 

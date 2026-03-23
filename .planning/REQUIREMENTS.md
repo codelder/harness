@@ -11,23 +11,22 @@ Requirements completed in shipped milestones.
 
 All Phase 1 requirements archived. See [v0.1-REQUIREMENTS.md](milestones/v0.1-REQUIREMENTS.md)
 
-## v0.2 Requirements (In Progress)
+### v0.2 Tool Use (Phase 2) — Shipped 2026-03-23
+
+All Phase 2 requirements archived. See [v0.2-REQUIREMENTS.md](milestones/v0.2-REQUIREMENTS.md)
+
+## v0.3 Requirements (In Progress)
 
 Requirements for next milestone. Each maps to roadmap phases.
-
-### Phase 2: s02 - Tool Use
-
-- [x] **CORE-02**: Tool dispatch system with handler registration — dispatch map: name -> handler function
-- [x] **CORE-03**: Bash tool for command execution — execute shell commands with output capture
-- [x] **CORE-04**: Read/Write/Edit file tools — atomic file operations for code manipulation
-- [x] **CORE-05**: Multi-backend LLM provider — Anthropic, OpenAI functional (Ollama pending rig-core support)
-- [x] **PLAN-05**: Glob/Grep tools for code search — pattern matching for file discovery
-- [x] **PERS-04**: Sandbox execution with interactive confirmation — basic command blacklist (full sandbox Phase 8)
-- [ ] **CROSS-01**: MCP protocol support via rmcp — DEFERRED: not implemented in v0.2
 
 ### Phase 3: s03 - TodoWrite
 
 - [ ] **PLAN-01**: TodoWrite with nag reminders — task list that reminds agent of pending work
+  - TodoManager state management (pending/in_progress/completed)
+  - Maximum 20 todos constraint
+  - Only one in_progress task at a time
+  - Nag reminder after 3+ rounds without todo call
+  - render() method for formatted output
 
 ### Phase 4: s04 - Subagents
 
@@ -108,19 +107,18 @@ Which phases cover which requirements. Updated during roadmap creation.
 | Requirement | Phase | Status |
 | ----------- | ----- | ------ |
 | ~~CORE-01~~ | ~~Phase 1~~ | ✅ Archived (v0.1) |
-| ~~CORE-05 (partial)~~ | ~~Phase 1~~ | ✅ Archived (v0.1) |
+| ~~CORE-02~~ | ~~Phase 2~~ | ✅ Archived (v0.2) |
+| ~~CORE-03~~ | ~~Phase 2~~ | ✅ Archived (v0.2) |
+| ~~CORE-04~~ | ~~Phase 2~~ | ✅ Archived (v0.2) |
+| ~~CORE-05 (partial)~~ | ~~Phase 2~~ | ✅ Archived (v0.2) |
 | ~~CORE-06~~ | ~~Phase 1~~ | ✅ Archived (v0.1) |
 | ~~CROSS-02~~ | ~~Phase 1~~ | ✅ Archived (v0.1) |
 | ~~CROSS-03~~ | ~~Phase 1~~ | ✅ Archived (v0.1) |
 | ~~CROSS-04~~ | ~~Phase 1~~ | ✅ Archived (v0.1) |
-| CORE-02 | Phase 2 | Complete |
-| CORE-03 | Phase 2 | Complete |
-| CORE-04 | Phase 2 | Complete |
-| CORE-05 (partial) | Phase 2 | Complete |
-| PLAN-05 | Phase 2 | Complete |
-| PERS-04 (partial) | Phase 2 | Complete |
+| ~~PLAN-05~~ | ~~Phase 2~~ | ✅ Archived (v0.2) |
+| ~~PERS-04 (partial)~~ | ~~Phase 2~~ | ✅ Archived (v0.2) |
 | CROSS-01 | Phase 2 | Deferred |
-| PLAN-01 | Phase 3 | Pending |
+| PLAN-01 | Phase 3 | Active |
 | PLAN-02 | Phase 4 | Pending |
 | PLAN-03 | Phase 5 | Pending |
 | PLAN-04 | Phase 6 | Pending |
@@ -138,8 +136,9 @@ Which phases cover which requirements. Updated during roadmap creation.
 **Coverage:**
 
 - v0.1 requirements: 6 (archived)
-- v0.2 requirements: 19 (pending)
+- v0.2 requirements: 7 (archived)
+- v0.3 requirements: 1 (active)
 
 ---
 *Requirements defined: 2025-03-20*
-*Last updated: 2026-03-22 after v0.1 milestone archive*
+*Last updated: 2026-03-23 after v0.2 milestone archive*

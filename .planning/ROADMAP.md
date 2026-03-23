@@ -4,7 +4,8 @@
 
 - ✅ **v0.1 Foundation** — Phase 1 (shipped 2026-03-22)
 - ✅ **v0.2 Tool Use** — Phase 2 (shipped 2026-03-23)
-- 🚧 **v0.3 Advanced Features** — Phases 3-4 (next)
+- 🚧 **v0.3 TodoWrite** — Phase 3 (in progress)
+- 📋 **v0.4 Subagents** — Phase 4 (planned)
 - 📋 **v1.0 Core** — Phases 5-8 (planned)
 - 📋 **v2.0 Teams** — Phases 9-12 (planned)
 
@@ -32,9 +33,12 @@ See: [v0.2-ROADMAP.md](milestones/v0.2-ROADMAP.md)
 
 </details>
 
-### 🚧 v0.3 Advanced Features (Next)
+### 🚧 v0.3 TodoWrite (In Progress)
 
 - [ ] **Phase 3: s03 - TodoWrite** — Task planning with nag reminders
+
+### 📋 v0.4 Subagents (Planned)
+
 - [ ] **Phase 4: s04 - Subagents** — Subagent spawning with isolated context
 
 ### 📋 v1.0 Core (Planned)
@@ -58,12 +62,16 @@ See: [v0.2-ROADMAP.md](milestones/v0.2-ROADMAP.md)
 **Goal**: Agent maintains persistent task list that prevents drift
 **Depends on**: Phase 2
 **Requirements**: PLAN-01, CROSS-02, CROSS-03, CROSS-04
+**Reference**: [s03-todo-write.md](https://github.com/shareAI-lab/learn-claude-code/blob/main/docs/en/s03-todo-write.md)
 **Success Criteria** (what must be TRUE):
 
   1. Agent can create, update, and delete tasks in a task list
-  2. Agent receives nag reminders about pending tasks during loops
+  2. Agent receives nag reminders about pending tasks during loops (3+ rounds without todo call)
   3. Task state persists across agent turns
   4. Agent can mark tasks complete and track progress
+  5. Only one task can be in_progress at a time (enforced constraint)
+  6. Maximum 20 todos enforced (prevents context explosion)
+  7. TodoTool returns formatted string via render() method
 **Plans**: TBD
 
 ### Phase 4: s04 - Subagents
@@ -190,7 +198,7 @@ See: [v0.2-ROADMAP.md](milestones/v0.2-ROADMAP.md)
 | 1. s01 - Agent Loop | v0.1 | 4/4 | Complete | 2026-03-21 |
 | 2. s02 - Tool Use | v0.2 | 3/3 | Complete | 2026-03-23 |
 | 3. s03 - TodoWrite | v0.3 | 0/TBD | Not started | - |
-| 4. s04 - Subagents | v0.3 | 0/TBD | Not started | - |
+| 4. s04 - Subagents | v0.4 | 0/TBD | Not started | - |
 | 5. s05 - Skills | v1.0 | 0/TBD | Not started | - |
 | 6. s06 - Context Compact | v1.0 | 0/TBD | Not started | - |
 | 7. s07 - Tasks | v1.0 | 0/TBD | Not started | - |

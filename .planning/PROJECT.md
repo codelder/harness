@@ -19,6 +19,23 @@ The harness provides the environment that enables an LLM (the agent) to perceive
 - 6 production tools: Bash, Read, Write, Edit, Glob, Grep
 - Multi-provider support: Anthropic, OpenAI (Ollama pending)
 
+## Current Milestone: v0.3 TodoWrite
+
+**Goal:** Implement TodoWrite tool for multi-step task tracking with nag reminders
+
+**Target Features:**
+1. TodoManager state management (pending/in_progress/completed)
+2. todo tool registered to tool dispatch
+3. Nag reminder mechanism (inject reminder after 3+ rounds without todo call)
+4. "Only one in_progress" constraint
+5. Max 20 todos limit
+
+**Reference:**
+- [s03-todo-write.md](https://github.com/shareAI-lab/learn-claude-code/blob/main/docs/en/s03-todo-write.md)
+- [s03_todo_write.py](https://github.com/shareAI-lab/learn-claude-code/blob/main/agents/s03_todo_write.py)
+
+**Phase:** 3 (s03 - TodoWrite)
+
 ## Requirements
 
 ### Validated
