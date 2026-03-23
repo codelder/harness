@@ -91,7 +91,9 @@ impl Session {
                     info!(input = line, "User input received");
 
                     print!("Agent: ");
-                    std::io::stdout().flush().unwrap();
+                    if let Err(e) = std::io::stdout().flush() {
+                        warn!("Failed to flush stdout: {}", e);
+                    }
 
                     // Create hook for this turn (flag starts false)
                     let (hook, used_todo_flag) = TodoUsageHook::new();
@@ -101,7 +103,7 @@ impl Session {
                             debug!(response_len = turn.response.len(), "Agent response received");
 
                             // Check if todo was used (directly from dispatch via hook)
-                            // This is equivalent to Python's: rounds_since_todo = 0 if used_todo else rounds_since_todo + 1
+                            // Reset counter when todo is used; increment happens after response
                             if used_todo_flag.load(Ordering::SeqCst) {
                                 self.rounds_since_todo = 0;
                                 used_todo_flag.store(false, Ordering::SeqCst); // Reset for next turn
