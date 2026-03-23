@@ -1,5 +1,24 @@
 # Milestones
 
+## v0.3 TodoWrite (Shipped: 2026-03-23)
+
+**Phases completed:** 4 phases, 12 plans, 22 tasks
+
+**Key accomplishments:**
+
+- Rust project foundation with Cargo.toml dependencies, module skeleton, and error classification types with is_retryable() logic
+- Chosen: Enum-based Provider Dispatch
+- 1. [Rule 3 - Blocking] rig-core Chat trait not object-safe
+- Interactive REPL CLI with clap argument parsing, tracing-based logging, and graceful Ctrl+C exit with session summary
+- One-liner:
+- Primary Goal:
+- All six tools (Bash, Read, Write, Edit, Glob, Grep) registered with AgentBuilder for both Anthropic and OpenAI providers via .tool() chain pattern
+- 1. [Rule 1 - Bug] Added PartialEq/Eq derives to TodoError
+- TodoTool implementing rig::tool::Tool trait with Arc<Mutex<TodoManager>> for shared state access, enabling LLM agent task tracking.
+- Session integration with todo_manager field, TodoUsageHook for tool detection, and model-visible nag reminder injection
+
+---
+
 ## v0.2 Tool Use (Shipped: 2026-03-23)
 
 **Status:** ✅ SHIPPED

@@ -15,25 +15,11 @@ The harness provides the environment that enables an LLM (the agent) to perceive
 **Shipped:** v0.3 TodoWrite (2026-03-24)
 
 - 3,500+ lines of Rust code
-- 100+ tests passing
+- 110+ tests passing
 - 7 production tools: Bash, Read, Write, Edit, Glob, Grep, TodoWrite
 - Multi-provider support: Anthropic, OpenAI (Ollama pending)
 - Nag reminder system for drift prevention
-
-## Current Milestone: v0.4 Subagents
-
-**Goal:** Subagent spawning with isolated context
-
-**Target Features:**
-1. Spawn child agents with fresh message arrays
-2. Child agents execute without polluting parent context
-3. Parent receives summarized results when child completes
-4. Graceful error handling for child failures
-
-**Reference:**
-- [s04-subagents.md](https://github.com/shareAI-lab/learn-claude-code/blob/main/docs/en/s04-subagents.md)
-
-**Phase:** 4 (s04 - Subagents)
+- Async-safe shared state with tokio::sync::Mutex
 
 ## Requirements
 
@@ -46,10 +32,10 @@ The harness provides the environment that enables an LLM (the agent) to perceive
 - ✓ File tools: Read, Write, Edit — v0.2
 - ✓ Search tools: Glob, Grep — v0.2
 - ✓ Bash tool with safety blacklist — v0.2
+- ✓ TodoWrite for task planning with nag reminders (s03) — v0.3
 
 ### Active
 
-- [ ] TodoWrite for task planning with nag reminders (s03)
 - [ ] Subagent spawning with isolated context (s04)
 - [ ] On-demand skill loading via tool_result (s05)
 - [ ] Three-layer context compression strategy (s06)
@@ -82,7 +68,7 @@ Harness = Tools + Knowledge + Observation + Action Interfaces + Permissions
 The 12 sessions build progressively:
 
 - **Phase 1 (s01-s02)**: The Loop — basic agent loop and tool dispatch ✅ SHIPPED
-- **Phase 2 (s03-s06)**: Planning & Knowledge — TodoWrite, subagents, skills, compression
+- **Phase 2 (s03-s06)**: Planning & Knowledge — TodoWrite, subagents, skills, compression ✅ v0.3 SHIPPED (TodoWrite)
 - **Phase 3 (s07-s08)**: Persistence — task system and background execution
 - **Phase 4 (s09-s12)**: Teams — multi-agent coordination and isolation
 
@@ -104,8 +90,11 @@ The 12 sessions build progressively:
 | AgentBuilder.tool() chain for registration | Clean, declarative tool registration | ✓ Good |
 | 50K char output truncation | Prevents context explosion | ✓ Good |
 | Command blacklist for BashTool safety | Simple, effective baseline protection | ✓ Good |
+| tokio::sync::Mutex for shared state | Non-blocking in async paths, no lock poisoning | ✓ Good |
+| TodoStatus typed in API (not String) | Compile-time validation, serde handles deserialization | ✓ Good |
+| PromptHook for todo usage detection | Direct tool call observation, rig-idiomatic | ✓ Good |
 | Ollama support via rig-core native | Waiting for upstream support | ⚠ Pending |
 | MCP protocol via rmcp | Deferred to future phase | — Deferred |
 
 ---
-Last updated: 2026-03-23 after v0.2 milestone
+*Last updated: 2026-03-24 after v0.3 milestone*
