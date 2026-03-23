@@ -1,5 +1,7 @@
 use super::{AgentTurn, Message, Role};
 use crate::error::{classify_prompt_error, AgentError};
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::Arc;
 use std::time::Duration;
 use tokio::time::sleep;
 
@@ -8,6 +10,40 @@ const MAX_RETRIES: u32 = 3;
 
 /// Initial delay for exponential backoff (1 second)
 const INITIAL_DELAY: Duration = Duration::from_secs(1);
+
+/// Hook that tracks whether the todo tool was called during agent execution.
+///
+/// This implements direct tool call detection (per Python reference implementation)
+/// instead of indirect detection via TodoManager state changes.
+///
+/// The actual `impl PromptHook` must be in provider.rs because:
+/// 1. PromptHook is generic over the CompletionModel type
+/// 2. The model type is only known at provider creation time
+/// 3. This keeps loop_.rs provider-agnostic
+pub struct TodoUsageHook {
+    /// Flag set to true when todo tool is called
+    used_todo: Arc<AtomicBool>,
+}
+
+impl TodoUsageHook {
+    /// Create a new hook with a shared flag.
+    ///
+    /// Returns the hook and a clone of the flag that can be checked
+    /// after agent execution completes.
+    pub fn new() -> (Self, Arc<AtomicBool>) {
+        let used_todo = Arc::new(AtomicBool::new(false));
+        let hook = Self {
+            used_todo: used_todo.clone(),
+        };
+        (hook, used_todo)
+    }
+}
+
+impl Default for TodoUsageHook {
+    fn default() -> Self {
+        Self::new().0
+    }
+}
 
 /// Execute an operation with automatic retry on retryable errors
 ///
