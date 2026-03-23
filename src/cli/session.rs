@@ -1,8 +1,9 @@
-use crate::agent::{agent_loop, Message};
+use crate::agent::{agent_loop, Message, TodoUsageHook};
 use crate::error::AgentError;
 use crate::planning::TodoManager;
 use reedline::{DefaultPrompt, DefaultPromptSegment, Reedline, Signal};
 use std::io::Write;
+use std::sync::atomic::Ordering;
 use std::sync::{Arc, Mutex};
 use tracing::{debug, error, info, warn};
 
@@ -87,8 +88,33 @@ impl Session {
                     match agent_loop(&self.messages, line, &provider).await {
                         Ok(turn) => {
                             debug!(response_len = turn.response.len(), "Agent response received");
-                            println!("{}", turn.response);
+
+                            // Build the response with optional nag reminder
+                            // Per Python reference: inject reminder into response for model visibility
+                            let response = if self.rounds_since_todo >= 3 {
+                                let has_todos = self.todo_manager.lock()
+                                    .map(|m| !m.is_empty())
+                                    .unwrap_or(false);
+                                if has_todos {
+                                    format!(
+                                        "<reminder>You have pending todos. Use the 'todo' tool to update your task list.</reminder>\n\n{}",
+                                        turn.response
+                                    )
+                                } else {
+                                    turn.response.clone()
+                                }
+                            } else {
+                                turn.response.clone()
+                            };
+
+                            println!("{}", response);
+
+                            // Increment round counter after each agent response
+                            // Note: TodoUsageHook flag reset will be integrated in Plan 04
+                            self.rounds_since_todo += 1;
+
                             // Commit the turn to history only on success
+                            // Store the original response (without reminder) in history
                             self.messages.push(Message::user(&turn.user_input));
                             self.messages.push(Message::assistant(&turn.response));
                             self.turn_count += 1;
