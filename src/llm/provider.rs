@@ -1,5 +1,7 @@
 use crate::error::ProviderError;
-use crate::tools::{BashTool, ReadTool, WriteTool, EditTool, GlobTool, GrepTool};
+use crate::tools::{BashTool, ReadTool, WriteTool, EditTool, GlobTool, GrepTool, TodoTool};
+use crate::planning::TodoManager;
+use std::sync::{Arc, Mutex};
 use rig::agent::{Agent, AgentBuilder};
 use rig::client::CompletionClient;
 use rig::completion::{Chat, Message, PromptError};
@@ -16,6 +18,7 @@ Available tools:
 - edit: Perform precise string replacements in files
 - glob: Find files matching patterns
 - grep: Search file contents with regex
+- todo: Track progress on multi-step tasks
 
 Use these tools to interact with the system and accomplish tasks."#;
 
@@ -150,6 +153,7 @@ impl LlmProvider {
 /// * `base_url` - Optional custom base URL (for proxies or custom endpoints)
 /// * `thinking` - Enable extended thinking/reasoning (Anthropic only)
 /// * `thinking_budget` - Budget tokens for extended thinking
+/// * `todo_manager` - Shared TodoManager for the todo tool
 ///
 /// # Returns
 /// An LlmProvider enum variant that can be used to interact with the LLM
@@ -162,6 +166,7 @@ pub fn create_provider(
     base_url: Option<&str>,
     thinking: bool,
     thinking_budget: u64,
+    todo_manager: Arc<Mutex<TodoManager>>,
 ) -> Result<LlmProvider, ProviderError> {
     match provider_type {
         ProviderType::Anthropic => {
@@ -184,6 +189,9 @@ pub fn create_provider(
             // Create completion model
             let completion_model = client.completion_model(model);
 
+            // Create TodoTool with shared TodoManager
+            let todo_tool = TodoTool::new(todo_manager.clone());
+
             // Build agent with tools using AgentBuilder
             // Note: max_tokens is required for Anthropic API
             let mut agent_builder = AgentBuilder::new(completion_model)
@@ -194,6 +202,7 @@ pub fn create_provider(
                 .tool(EditTool)
                 .tool(GlobTool)
                 .tool(GrepTool)
+                .tool(todo_tool)
                 .default_max_turns(DEFAULT_MAX_TURNS)
                 .max_tokens(4096);
 
@@ -232,6 +241,9 @@ pub fn create_provider(
             // Create completion model using Responses API (default for openai::Client)
             let completion_model = client.completion_model(model);
 
+            // Create TodoTool with shared TodoManager
+            let todo_tool = TodoTool::new(todo_manager.clone());
+
             // Build agent with tools using AgentBuilder
             let agent = AgentBuilder::new(completion_model)
                 .preamble(SYSTEM_PROMPT)
@@ -241,6 +253,7 @@ pub fn create_provider(
                 .tool(EditTool)
                 .tool(GlobTool)
                 .tool(GrepTool)
+                .tool(todo_tool)
                 .default_max_turns(DEFAULT_MAX_TURNS)
                 .build();
 
@@ -257,6 +270,7 @@ pub fn create_provider(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::planning::TodoManager;
 
     #[test]
     fn test_provider_type_display() {
@@ -292,8 +306,11 @@ mod tests {
         // Set a dummy API key for testing
         env::set_var("HARNESS_ANTHROPIC_KEY", "test-key-12345");
 
+        // Create a fresh TodoManager for the test
+        let todo_manager = Arc::new(Mutex::new(TodoManager::new()));
+
         // Test with a custom model name (not standard Claude model)
-        let result = create_provider(ProviderType::Anthropic, "custom-model-name", None, false, 10000);
+        let result = create_provider(ProviderType::Anthropic, "custom-model-name", None, false, 10000, todo_manager);
 
         // Restore original API key
         match original_key {
