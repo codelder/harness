@@ -73,46 +73,6 @@ pub enum LlmProvider {
 }
 
 impl LlmProvider {
-    /// Send a chat message to the LLM provider
-    ///
-    /// # Arguments
-    /// * `prompt` - The prompt message to send
-    /// * `chat_history` - Previous conversation history
-    ///
-    /// # Returns
-    /// The LLM's response as a string
-    ///
-    /// # Errors
-    /// Returns PromptError if the request fails
-    pub async fn chat(
-        &self,
-        prompt: impl Into<String>,
-        chat_history: Vec<String>,
-    ) -> Result<String, PromptError> {
-        // For now, we'll use a simple approach where chat_history is treated as user messages
-        // In a future iteration, we can add proper message role handling
-        let history: Vec<Message> = chat_history
-            .into_iter()
-            .map(|msg| Message::user(msg))
-            .collect();
-
-        match self {
-            LlmProvider::Anthropic(agent) => {
-                agent.chat(prompt.into(), history).await
-            }
-            LlmProvider::Openai(agent) => {
-                agent.chat(prompt.into(), history).await
-            }
-            LlmProvider::Ollama => {
-                Err(PromptError::CompletionError(
-                    rig::completion::CompletionError::ResponseError(
-                        "Ollama provider not yet implemented".to_string()
-                    )
-                ))
-            }
-        }
-    }
-
     /// Send a chat message with conversation history (rig Message type)
     ///
     /// # Arguments
