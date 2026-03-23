@@ -106,7 +106,8 @@ None.
 | # | Description | Date | Commit | Status | Directory |
 |---|-------------|------|--------|--------|-----------|
 | 260323-f25 | Fix Phase 2 tool issues from code review | 2026-03-23 | d866d1d | Verified | [260323-f25-fix-phase-2-tool-issues-from-code-review](./quick/260323-f25-fix-phase-2-tool-issues-from-code-review/) |
+| 260323-o32 | Add --thinking option for extended thinking/reasoning logs | 2026-03-23 | pending | Complete | [260323-o32-llm-log](./quick/260323-o32-llm-log/) |
 
 ## Session Continuity
 
-Last activity: 2026-03-23 - Completed quick task 260323-f25: Fix Phase 2 tool issues from code review
+Last activity: 2026-03-23 - Completed quick task 260323-o32: Add --thinking option for extended thinking/reasoning logs

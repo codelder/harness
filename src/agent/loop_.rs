@@ -11,7 +11,8 @@ const INITIAL_DELAY: Duration = Duration::from_secs(1);
 
 /// Execute an operation with automatic retry on retryable errors
 ///
-/// Uses exponential backoff: 1s, 2s, 4s delays between retries
+/// For rate limiting: uses the retry-after duration specified by the API
+/// For other errors: uses exponential backoff: 1s, 2s, 4s delays between retries
 ///
 /// # Arguments
 /// * `max_retries` - Maximum number of retry attempts
@@ -27,15 +28,25 @@ where
     F: FnMut() -> Fut,
     Fut: std::future::Future<Output = Result<T, AgentError>>,
 {
-    let mut delay = INITIAL_DELAY;
+    let mut backoff_delay = INITIAL_DELAY;
 
     for attempt in 0..=max_retries {
         match operation().await {
             Ok(result) => return Ok(result),
             Err(e) if e.is_retryable() && attempt < max_retries => {
-                eprintln!("Retry {}/{}: {}", attempt + 1, max_retries, e);
-                sleep(delay).await;
-                delay *= 2; // Exponential backoff
+                // Use API-specified retry-after for rate limiting, otherwise exponential backoff
+                let retry_delay = match &e {
+                    AgentError::RateLimited(duration) => *duration,
+                    _ => backoff_delay,
+                };
+
+                eprintln!("Retry {}/{}: {} (waiting {:?})", attempt + 1, max_retries, e, retry_delay);
+                sleep(retry_delay).await;
+
+                // Only increase backoff for non-rate-limit errors
+                if !matches!(e, AgentError::RateLimited(_)) {
+                    backoff_delay *= 2;
+                }
             }
             Err(e) => return Err(e),
         }
@@ -185,5 +196,31 @@ mod tests {
 
         assert!(result.is_err());
         assert_eq!(counter.load(Ordering::SeqCst), 3); // Initial + 2 retries
+    }
+
+    #[tokio::test]
+    async fn test_rate_limit_uses_retry_after_duration() {
+        let counter = Arc::new(AtomicU32::new(0));
+        let counter_clone = counter.clone();
+        let start = std::time::Instant::now();
+
+        let result: Result<i32, AgentError> = with_retry(1, move || {
+            let counter = counter_clone.clone();
+            async move {
+                let attempt = counter.fetch_add(1, Ordering::SeqCst);
+                if attempt == 0 {
+                    // Simulate rate limit with 100ms retry-after
+                    Err(AgentError::RateLimited(Duration::from_millis(100)))
+                } else {
+                    Ok(42)
+                }
+            }
+        })
+        .await;
+
+        let elapsed = start.elapsed();
+        assert_eq!(result.unwrap(), 42);
+        // Should have waited at least 100ms (the retry-after duration)
+        assert!(elapsed >= Duration::from_millis(100), "Expected at least 100ms wait, got {:?}", elapsed);
     }
 }

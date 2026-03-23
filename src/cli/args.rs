@@ -15,14 +15,22 @@ pub struct Args {
     pub model: String,
 
     /// Base URL for the API (optional, for proxies or custom endpoints)
-    /// For Anthropic: can also set ANTHROPIC_BASE_URL env var
-    /// For OpenAI: can also set OPENAI_BASE_URL env var
+    /// For Anthropic: can also set HARNESS_ANTHROPIC_URL env var
+    /// For OpenAI: can also set HARNESS_OPENAI_URL env var
     #[arg(long)]
     pub base_url: Option<String>,
 
-    /// Verbosity level (-v for info, -vv for debug)
+    /// Verbosity level (-v for info, -vv for debug, -vvv for trace with LLM logs)
     #[arg(short, long, action = clap::ArgAction::Count)]
     pub verbose: u8,
+
+    /// Enable extended thinking/reasoning (Anthropic only, requires supported model)
+    #[arg(long)]
+    pub thinking: bool,
+
+    /// Budget tokens for extended thinking (default: 10000, only used with --thinking)
+    #[arg(long, default_value = "10000")]
+    pub thinking_budget: u64,
 }
 
 /// Supported LLM providers
@@ -35,11 +43,13 @@ pub enum Provider {
 
 impl Args {
     /// Convert verbose flag count to tracing level
+    /// Note: Use -vvv for trace level to enable LLM logging
     pub fn tracing_level(&self) -> tracing::Level {
         match self.verbose {
             0 => tracing::Level::WARN,
             1 => tracing::Level::INFO,
-            _ => tracing::Level::DEBUG,
+            2 => tracing::Level::DEBUG,
+            _ => tracing::Level::TRACE,
         }
     }
 
@@ -64,6 +74,8 @@ mod tests {
             model: "claude-3-5-sonnet".to_string(),
             base_url: None,
             verbose: 0,
+            thinking: false,
+            thinking_budget: 10000,
         };
         assert_eq!(args.tracing_level(), tracing::Level::WARN);
     }
@@ -75,6 +87,8 @@ mod tests {
             model: "claude-3-5-sonnet".to_string(),
             base_url: None,
             verbose: 1,
+            thinking: false,
+            thinking_budget: 10000,
         };
         assert_eq!(args.tracing_level(), tracing::Level::INFO);
     }
@@ -86,8 +100,23 @@ mod tests {
             model: "claude-3-5-sonnet".to_string(),
             base_url: None,
             verbose: 2,
+            thinking: false,
+            thinking_budget: 10000,
         };
         assert_eq!(args.tracing_level(), tracing::Level::DEBUG);
+    }
+
+    #[test]
+    fn test_tracing_level_trace() {
+        let args = Args {
+            provider: Provider::Anthropic,
+            model: "claude-3-5-sonnet".to_string(),
+            base_url: None,
+            verbose: 3,
+            thinking: false,
+            thinking_budget: 10000,
+        };
+        assert_eq!(args.tracing_level(), tracing::Level::TRACE);
     }
 
     #[test]

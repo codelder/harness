@@ -28,12 +28,17 @@ impl Session {
         provider_type: crate::llm::ProviderType,
         model: &str,
         base_url: Option<&str>,
+        thinking: bool,
+        thinking_budget: u64,
     ) -> Result<(), AgentError> {
-        let provider = crate::llm::create_provider(provider_type, model, base_url)?;
-        info!(provider = ?provider_type, model = model, "Session initialized");
+        let provider = crate::llm::create_provider(provider_type, model, base_url, thinking, thinking_budget)?;
+        info!(provider = ?provider_type, model = model, thinking = thinking, "Session initialized");
 
         println!("Agent Harness v0.1.0");
         println!("Provider: {} | Model: {}", provider_type, model);
+        if thinking {
+            println!("Extended thinking: enabled (budget: {} tokens)", thinking_budget);
+        }
         println!("Type your message and press Enter. Ctrl+C or Ctrl+D to exit.\n");
 
         let prompt = DefaultPrompt::new(

@@ -148,6 +148,8 @@ impl LlmProvider {
 /// * `provider_type` - The provider type (Anthropic, Openai, Ollama)
 /// * `model` - The model identifier (provider-specific)
 /// * `base_url` - Optional custom base URL (for proxies or custom endpoints)
+/// * `thinking` - Enable extended thinking/reasoning (Anthropic only)
+/// * `thinking_budget` - Budget tokens for extended thinking
 ///
 /// # Returns
 /// An LlmProvider enum variant that can be used to interact with the LLM
@@ -158,19 +160,21 @@ pub fn create_provider(
     provider_type: ProviderType,
     model: &str,
     base_url: Option<&str>,
+    thinking: bool,
+    thinking_budget: u64,
 ) -> Result<LlmProvider, ProviderError> {
     match provider_type {
         ProviderType::Anthropic => {
             // Check for API key before calling builder
-            let api_key = std::env::var("ANTHROPIC_API_KEY")
+            let api_key = std::env::var("HARNESS_ANTHROPIC_KEY")
                 .map_err(|_| ProviderError::MissingApiKey("anthropic".to_string()))?;
 
             let mut builder = anthropic::Client::builder().api_key(api_key);
 
-            // Check for base URL: CLI arg > ANTHROPIC_BASE_URL env
+            // Check for base URL: CLI arg > HARNESS_ANTHROPIC_URL env
             if let Some(url) = base_url {
                 builder = builder.base_url(url);
-            } else if let Ok(env_url) = std::env::var("ANTHROPIC_BASE_URL") {
+            } else if let Ok(env_url) = std::env::var("HARNESS_ANTHROPIC_URL") {
                 builder = builder.base_url(&env_url);
             }
 
@@ -182,7 +186,7 @@ pub fn create_provider(
 
             // Build agent with tools using AgentBuilder
             // Note: max_tokens is required for Anthropic API
-            let agent = AgentBuilder::new(completion_model)
+            let mut agent_builder = AgentBuilder::new(completion_model)
                 .preamble(SYSTEM_PROMPT)
                 .tool(BashTool)
                 .tool(ReadTool)
@@ -191,22 +195,32 @@ pub fn create_provider(
                 .tool(GlobTool)
                 .tool(GrepTool)
                 .default_max_turns(DEFAULT_MAX_TURNS)
-                .max_tokens(4096)
-                .build();
+                .max_tokens(4096);
+
+            // Enable extended thinking if requested
+            if thinking {
+                let thinking_config = serde_json::json!({
+                    "type": "enabled",
+                    "budget_tokens": thinking_budget
+                });
+                agent_builder = agent_builder.additional_params(thinking_config);
+            }
+
+            let agent = agent_builder.build();
 
             Ok(LlmProvider::Anthropic(agent))
         }
         ProviderType::Openai => {
             // Check for API key before calling builder
-            let api_key = std::env::var("OPENAI_API_KEY")
+            let api_key = std::env::var("HARNESS_OPENAI_KEY")
                 .map_err(|_| ProviderError::MissingApiKey("openai".to_string()))?;
 
             let mut builder = openai::Client::builder().api_key(api_key);
 
-            // Check for base URL: CLI arg > OPENAI_BASE_URL env
+            // Check for base URL: CLI arg > HARNESS_OPENAI_URL env
             if let Some(url) = base_url {
                 builder = builder.base_url(url);
-            } else if let Ok(env_url) = std::env::var("OPENAI_BASE_URL") {
+            } else if let Ok(env_url) = std::env::var("HARNESS_OPENAI_URL") {
                 builder = builder.base_url(&env_url);
             }
 
@@ -271,18 +285,18 @@ mod tests {
         use std::env;
 
         // Save original API key
-        let original_key = env::var("ANTHROPIC_API_KEY");
+        let original_key = env::var("HARNESS_ANTHROPIC_KEY");
 
         // Set a dummy API key for testing
-        env::set_var("ANTHROPIC_API_KEY", "test-key-12345");
+        env::set_var("HARNESS_ANTHROPIC_KEY", "test-key-12345");
 
         // Test with a custom model name (not standard Claude model)
-        let result = create_provider(ProviderType::Anthropic, "custom-model-name", None);
+        let result = create_provider(ProviderType::Anthropic, "custom-model-name", None, false, 10000);
 
         // Restore original API key
         match original_key {
-            Ok(val) => env::set_var("ANTHROPIC_API_KEY", val),
-            Err(_) => env::remove_var("ANTHROPIC_API_KEY"),
+            Ok(val) => env::set_var("HARNESS_ANTHROPIC_KEY", val),
+            Err(_) => env::remove_var("HARNESS_ANTHROPIC_KEY"),
         }
 
         // Provider creation should succeed (max_tokens is set to 4096)
