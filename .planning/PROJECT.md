@@ -2,7 +2,7 @@
 
 ## What This Is
 
-A high-performance, memory-safe AI agent harness built in Rust, re-implementing the 12-session curriculum from [learn-claude-code](https://github.com/shareAI-lab/learn-claude-code). This project transforms the Python reference implementation into a production-ready Rust CLI tool with a SvelteKit-based web visualization interface.
+A high-performance, memory-safe AI agent harness built in Rust, re-implementing the 12-session curriculum from [learn-claude-code](https://github.com/shareAI-lab/learn-claude-code). This project transforms the Python reference implementation into a production-ready Rust CLI tool.
 
 The harness provides the environment that enables an LLM (the agent) to perceive, reason, and act - implementing the core pattern: `Harness = Tools + Knowledge + Observation + Action + Permissions`.
 
@@ -10,16 +10,29 @@ The harness provides the environment that enables an LLM (the agent) to perceive
 
 **Performance and safety without sacrificing capability.** The Rust implementation delivers memory safety, zero-cost abstractions, and superior async performance while maintaining full feature parity with the Python reference - enabling real-time, long-running agent sessions without resource concerns.
 
+## Current State
+
+**Shipped:** v0.2 Tool Use (2026-03-23)
+
+- 2,832 lines of Rust code
+- 87 tests passing
+- 6 production tools: Bash, Read, Write, Edit, Glob, Grep
+- Multi-provider support: Anthropic, OpenAI (Ollama pending)
+
 ## Requirements
 
 ### Validated
 
-(None yet — ship to validate)
+- ✓ Agent loop with stop_reason handling (s01) — v0.1
+- ✓ Multi-backend LLM support: Anthropic, OpenAI — v0.1, v0.2
+- ✓ CLI interface with interactive mode — v0.1
+- ✓ Tool dispatch system with handler registration (s02) — v0.2
+- ✓ File tools: Read, Write, Edit — v0.2
+- ✓ Search tools: Glob, Grep — v0.2
+- ✓ Bash tool with safety blacklist — v0.2
 
 ### Active
 
-- [ ] Agent loop with stop_reason handling (s01)
-- [ ] Tool dispatch system with handler registration (s02)
 - [ ] TodoWrite for task planning with nag reminders (s03)
 - [ ] Subagent spawning with isolated context (s04)
 - [ ] On-demand skill loading via tool_result (s05)
@@ -30,11 +43,9 @@ The harness provides the environment that enables an LLM (the agent) to perceive
 - [ ] Team communication protocols (shutdown, plan approval FSM) (s10)
 - [ ] Autonomous task claiming by idle agents (s11)
 - [ ] Worktree isolation for parallel execution (s12)
-- [ ] Multi-backend LLM support (Anthropic, OpenAI, local models)
-- [ ] CLI interface with interactive mode
-- [ ] SvelteKit web visualization platform
-- [ ] Sandbox execution with interactive confirmation for system commands
-- [ ] MCP (Model Context Protocol) support
+- [ ] Ollama provider support (pending rig-core native support)
+- [ ] MCP (Model Context Protocol) support (deferred)
+- [ ] Full sandbox with path sanitization and allowlist
 
 ### Out of Scope
 
@@ -54,7 +65,7 @@ Harness = Tools + Knowledge + Observation + Action Interfaces + Permissions
 
 The 12 sessions build progressively:
 
-- **Phase 1 (s01-s02)**: The Loop — basic agent loop and tool dispatch
+- **Phase 1 (s01-s02)**: The Loop — basic agent loop and tool dispatch ✅ SHIPPED
 - **Phase 2 (s03-s06)**: Planning & Knowledge — TodoWrite, subagents, skills, compression
 - **Phase 3 (s07-s08)**: Persistence — task system and background execution
 - **Phase 4 (s09-s12)**: Teams — multi-agent coordination and isolation
@@ -64,19 +75,21 @@ The 12 sessions build progressively:
 - **Language**: Rust (stable, latest) — Memory safety and performance
 - **Async Runtime**: Tokio — Industry standard, best ecosystem
 - **LLM Backends**: Multi-provider via trait abstraction — Anthropic, OpenAI, Ollama/local
-- **Frontend**: SvelteKit — Type-safe, performant web visualization
-- **Protocol**: MCP support required — Model Context Protocol for extensibility
 - **Safety**: Sandbox-first with interactive escalation — Default isolation, confirm for system access
 
 ## Key Decisions
 
 | Decision | Rationale | Outcome |
 | -------- | --------- | ------- |
-| Tokio async runtime | Industry standard, best ecosystem, proven at scale | — Pending |
-| Multi-backend LLM | Flexibility for different models, future-proof | — Pending |
-| Sandbox-first security | Safety by default, explicit trust escalation | — Pending |
-| SvelteKit for web | Type-safe, performant, Rust-like developer experience | — Pending |
-| MCP protocol support | Extensibility, standard tool integration | — Pending |
+| Tokio async runtime | Industry standard, best ecosystem, proven at scale | ✓ Good |
+| rig-core 0.31 for multi-provider LLM | Zero-cost abstraction, type-safe, compile-time exhaustiveness | ✓ Good |
+| thiserror for library errors | Clean error types with #[from] conversion | ✓ Good |
+| Enum-based Provider dispatch | Zero-cost abstraction, type-safe | ✓ Good |
+| AgentBuilder.tool() chain for registration | Clean, declarative tool registration | ✓ Good |
+| 50K char output truncation | Prevents context explosion | ✓ Good |
+| Command blacklist for BashTool safety | Simple, effective baseline protection | ✓ Good |
+| Ollama support via rig-core native | Waiting for upstream support | ⚠ Pending |
+| MCP protocol via rmcp | Deferred to future phase | — Deferred |
 
 ---
-Last updated: 2025-03-20 after initialization
+Last updated: 2026-03-23 after v0.2 milestone
