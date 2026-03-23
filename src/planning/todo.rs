@@ -54,6 +54,10 @@ pub enum TodoError {
     InvalidStatus(String),
     #[error("Item #{0}: text is required")]
     MissingText(u32),
+    #[error("Invalid item ID: {0} (must be 1-20)")]
+    InvalidId(u32),
+    #[error("Duplicate item ID: {0}")]
+    DuplicateId(u32),
 }
 
 /// Manager for todo items with constraint validation

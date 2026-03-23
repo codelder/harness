@@ -17,7 +17,7 @@ pub struct TodoArgs {
 /// Input structure for a single todo item
 #[derive(Debug, Clone, Deserialize, JsonSchema)]
 pub struct TodoItemInput {
-    /// Task ID (1-20)
+    /// Task ID (positive integer, unique within list)
     pub id: u32,
     /// Task description
     pub text: String,
@@ -79,13 +79,27 @@ Usage notes:
     async fn call(&self, args: Self::Args) -> Result<Self::Output, Self::Error> {
         tracing::info!("Todo tool called with {} items", args.items.len());
 
-        // Convert TodoItemInput to TodoItem with validation
+        // Validate and convert TodoItemInput to TodoItem
         let mut items = Vec::with_capacity(args.items.len());
+        let mut seen_ids = std::collections::HashSet::new();
+
         for input in args.items {
+            // Validate ID is positive
+            if input.id < 1 {
+                return Err(TodoError::InvalidId(input.id));
+            }
+
+            // Validate ID uniqueness
+            if !seen_ids.insert(input.id) {
+                return Err(TodoError::DuplicateId(input.id));
+            }
+
+            // Validate text is not empty
             let text = input.text.trim();
             if text.is_empty() {
                 return Err(TodoError::MissingText(input.id));
             }
+
             items.push(TodoItem {
                 id: input.id,
                 text: text.to_string(),
@@ -212,5 +226,57 @@ mod tests {
         // Verify we can use the manager
         let mgr = manager.lock().await;
         assert!(mgr.is_empty());
+    }
+
+    #[tokio::test]
+    async fn test_todo_tool_call_invalid_id_zero() {
+        let tool = TodoTool::with_fresh_manager();
+        let args = TodoArgs {
+            items: vec![TodoItemInput {
+                id: 0, // Invalid: must be 1-20
+                text: "Task 0".to_string(),
+                status: TodoStatus::Pending,
+            }],
+        };
+
+        let result = tool.call(args).await;
+        assert!(matches!(result, Err(TodoError::InvalidId(0))));
+    }
+
+    #[tokio::test]
+    async fn test_todo_tool_call_invalid_id_negative() {
+        let tool = TodoTool::with_fresh_manager();
+        let args = TodoArgs {
+            items: vec![TodoItemInput {
+                id: 0, // Invalid: must be >= 1
+                text: "Task 0".to_string(),
+                status: TodoStatus::Pending,
+            }],
+        };
+
+        let result = tool.call(args).await;
+        assert!(matches!(result, Err(TodoError::InvalidId(0))));
+    }
+
+    #[tokio::test]
+    async fn test_todo_tool_call_duplicate_id() {
+        let tool = TodoTool::with_fresh_manager();
+        let args = TodoArgs {
+            items: vec![
+                TodoItemInput {
+                    id: 1,
+                    text: "First task".to_string(),
+                    status: TodoStatus::Pending,
+                },
+                TodoItemInput {
+                    id: 1, // Duplicate
+                    text: "Duplicate task".to_string(),
+                    status: TodoStatus::Pending,
+                },
+            ],
+        };
+
+        let result = tool.call(args).await;
+        assert!(matches!(result, Err(TodoError::DuplicateId(1))));
     }
 }
