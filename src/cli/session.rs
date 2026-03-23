@@ -43,7 +43,14 @@ impl Session {
         thinking: bool,
         thinking_budget: u64,
     ) -> Result<(), AgentError> {
-        let provider = crate::llm::create_provider(provider_type, model, base_url, thinking, thinking_budget)?;
+        let provider = crate::llm::create_provider(
+            provider_type,
+            model,
+            base_url,
+            thinking,
+            thinking_budget,
+            self.todo_manager.clone(),
+        )?;
         info!(provider = ?provider_type, model = model, thinking = thinking, "Session initialized");
 
         println!("Agent Harness v0.1.0");
@@ -85,9 +92,19 @@ impl Session {
                     print!("Agent: ");
                     std::io::stdout().flush().unwrap();
 
-                    match agent_loop(&self.messages, line, &provider).await {
+                    // Create hook for this turn (flag starts false)
+                    let (hook, used_todo_flag) = TodoUsageHook::new();
+
+                    match agent_loop(&self.messages, line, &provider, hook).await {
                         Ok(turn) => {
                             debug!(response_len = turn.response.len(), "Agent response received");
+
+                            // Check if todo was used (directly from dispatch via hook)
+                            // This is equivalent to Python's: rounds_since_todo = 0 if used_todo else rounds_since_todo + 1
+                            if used_todo_flag.load(Ordering::SeqCst) {
+                                self.rounds_since_todo = 0;
+                                used_todo_flag.store(false, Ordering::SeqCst); // Reset for next turn
+                            }
 
                             // Build the response with optional nag reminder
                             // Per Python reference: inject reminder into response for model visibility
@@ -110,7 +127,6 @@ impl Session {
                             println!("{}", response);
 
                             // Increment round counter after each agent response
-                            // Note: TodoUsageHook flag reset will be integrated in Plan 04
                             self.rounds_since_todo += 1;
 
                             // Commit the turn to history only on success
