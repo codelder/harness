@@ -97,3 +97,8 @@ Added `pub mod planning;` to `src/lib.rs` to expose the planning module.
 Plan 03-02 will implement:
 - TodoTool with Arc<Mutex<TodoManager>> for shared state
 - Tool registration with rig-core Tool trait
+
+## Self-Check: PASSED
+
+- All created files exist
+- All commits verified in git history
