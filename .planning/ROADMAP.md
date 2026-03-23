@@ -40,7 +40,7 @@ See: [v0.2-ROADMAP.md](milestones/v0.2-ROADMAP.md)
 Plans:
 - [x] 03-01-PLAN.md — TodoManager core state management with constraint validation
 - [x] 03-02-PLAN.md — TodoTool with Arc<Mutex<TodoManager>> for shared state
-- [ ] 03-03-PLAN.md — Session integration with nag reminder
+- [x] 03-03-PLAN.md — Session integration with nag reminder
 - [ ] 03-04-PLAN.md — Provider wiring and round counter reset
 
 ### 📋 v0.4 Subagents (Planned)
