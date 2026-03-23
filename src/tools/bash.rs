@@ -32,6 +32,9 @@ pub enum BashError {
 
     #[error("Invalid UTF-8 in command output")]
     InvalidUtf8,
+
+    #[error("Command blocked by safety filter: {0}")]
+    Blocked(String),
 }
 
 /// Bash tool for executing shell commands
@@ -64,6 +67,28 @@ Usage notes:
 
     async fn call(&self, args: Self::Args) -> Result<Self::Output, Self::Error> {
         tracing::info!("Executing bash command: {}", args.command);
+
+        // Safety blacklist check
+        let dangerous_patterns = [
+            "rm -rf /",
+            "rm -rf /*",
+            "sudo",
+            "mkfs",
+            "fdisk",
+            "shutdown",
+            "reboot",
+            "halt",
+            "dd if=",
+            "> /dev/sd",
+        ];
+
+        for pattern in &dangerous_patterns {
+            if args.command.contains(pattern) {
+                return Err(BashError::Blocked(
+                    format!("contains '{}'. This operation requires explicit user confirmation.", pattern)
+                ));
+            }
+        }
 
         let output = Command::new("bash")
             .arg("-c")
@@ -146,5 +171,60 @@ mod tests {
         let definition = tool.definition("test".to_string()).await;
         assert_eq!(definition.name, "bash");
         assert!(definition.description.contains("Execute bash"));
+    }
+
+    #[tokio::test]
+    async fn test_bash_tool_blocks_rm_rf_root() {
+        let tool = BashTool;
+        let args = BashArgs {
+            command: "rm -rf /".to_string(),
+            timeout: 10,
+        };
+        let result = tool.call(args).await;
+        assert!(result.is_err());
+        let err = result.unwrap_err();
+        assert!(err.to_string().contains("blocked by safety filter"));
+        assert!(err.to_string().contains("rm -rf /"));
+    }
+
+    #[tokio::test]
+    async fn test_bash_tool_blocks_sudo() {
+        let tool = BashTool;
+        let args = BashArgs {
+            command: "sudo apt-get install something".to_string(),
+            timeout: 10,
+        };
+        let result = tool.call(args).await;
+        assert!(result.is_err());
+        let err = result.unwrap_err();
+        assert!(err.to_string().contains("blocked by safety filter"));
+        assert!(err.to_string().contains("sudo"));
+    }
+
+    #[tokio::test]
+    async fn test_bash_tool_blocks_mkfs() {
+        let tool = BashTool;
+        let args = BashArgs {
+            command: "mkfs.ext4 /dev/sda1".to_string(),
+            timeout: 10,
+        };
+        let result = tool.call(args).await;
+        assert!(result.is_err());
+        let err = result.unwrap_err();
+        assert!(err.to_string().contains("blocked by safety filter"));
+        assert!(err.to_string().contains("mkfs"));
+    }
+
+    #[tokio::test]
+    async fn test_bash_tool_allows_safe_commands() {
+        let tool = BashTool;
+        let args = BashArgs {
+            command: "ls -la".to_string(),
+            timeout: 10,
+        };
+        let result = tool.call(args).await;
+        assert!(result.is_ok());
+        let output = result.unwrap();
+        assert!(output.contains("total"));
     }
 }
