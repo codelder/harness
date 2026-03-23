@@ -1,7 +1,7 @@
 ---
 phase: 02
 reviewers: [codex]
-reviewed_at: "2026-03-23T09:15:00Z"
+reviewed_at: "2026-03-23T10:30:00Z"
 plans_reviewed:
   - 02-01-PLAN.md
   - 02-02-PLAN.md
@@ -10,125 +10,144 @@ plans_reviewed:
 
 # Cross-AI Plan Review — Phase 2
 
-## Codex Review
+## Codex Review (Updated)
+
+*Review completed: 2026-03-23 10:30*
+*Reviewer: OpenAI Codex (gpt-5.4)*
 
 ### Plan 02-01: File Tools
 
 #### Summary
-This plan covers the core file-manipulation surface needed for Phase 2 and is appropriately scoped, but it is underspecified around atomicity, path safety, encoding behavior, and integration with the sandbox model. As written, it likely produces working tools, but not yet a defensible implementation for a long-running agent harness where file correctness and predictable failure modes matter.
+The plan is directionally sound and aligned with the phase goals, especially the choice to keep the API small and use `tokio::fs`. The main gap is that "atomic file operations" is listed as a requirement, but the current write/edit descriptions do not yet define an actually atomic update strategy, failure semantics, or concurrency behavior.
 
 #### Strengths
-- Targets the minimum useful file tool set: read, write, and precise edit.
-- `EditTool` explicitly defines two important failure cases: no match and multiple matches.
-- Read truncation requirement is called out up front instead of being left implicit.
-- Scope is narrow enough to fit the phase without drifting into full patch/diff editing.
+- Small tool surface area that matches the stated phase scope.
+- `ReadTool` with `offset` and `limit` is practical for large files and agent iteration.
+- `EditTool` limited to single replacement reduces ambiguity and keeps behavior predictable.
+- `tokio::fs` is the correct async choice for this project.
 
 #### Concerns
-- **HIGH**: "Write files atomically" is in the phase success criteria, but the plan only says "create/overwrite files." Atomic write semantics are not specified.
-- **HIGH**: No path validation or sandbox boundary checks are mentioned. A file tool without path constraints weakens the stated sandbox-first posture.
-- **MEDIUM**: `ReadTool` says offset/limit, but the plan does not define behavior for invalid offsets, huge files, non-UTF-8 content, or binary files.
-- **MEDIUM**: `WriteTool` does not specify what happens on partial failures when creating parent directories or replacing existing files.
-- **MEDIUM**: `EditTool` only supports single string replacement; that is fine for scope, but the plan does not define whether replacement is literal, line-oriented, encoding-aware, or newline-preserving.
-- **LOW**: No mention of tests for corner cases such as empty files, symlinks, permissions errors, or concurrent modifications.
+- **HIGH**: "Atomic" writes are underspecified. A plain `tokio::fs::write` is not atomic for updates.
+- **HIGH**: `EditTool` needs explicit behavior when `old_string` matches zero times or multiple times. Silent ambiguity will cause agent failures and bad edits.
+- **MEDIUM**: Character-based truncation can break UTF-8 boundaries if implemented naïvely over bytes.
+- **MEDIUM**: Auto-creating parent directories is convenient, but without policy checks it expands write scope in ways the model may not intend.
+- **MEDIUM**: No path validation is mentioned. Relative traversal (`../`) and symlink handling can undermine sandbox expectations.
+- **LOW**: Large file reads with offset/limit need a clear unit definition: bytes, chars, or lines.
 
 #### Suggestions
-- Specify atomic write behavior explicitly: write to a temp file in the same directory, `fsync` if needed, then rename.
-- Define a shared path-policy layer for all file tools: canonicalization, allowed roots, symlink handling, and rejection behavior.
-- Document binary/non-UTF-8 handling for `ReadTool` and `EditTool` rather than leaving it to implementation drift.
-- Add explicit error taxonomy for file tools so the agent gets structured, recoverable failures instead of opaque IO errors.
-- Add tests for truncation boundaries, nonexistent parents, permission denied, duplicate match replacement, and exact newline preservation.
+- Define atomic write/edit as: write to temp file in same directory, `fsync` if needed, then rename.
+- Make `EditTool` return structured outcomes: `not_found`, `multiple_matches`, `success`.
+- Define read slicing in bytes or lines, then implement safely and document it.
+- Normalize and validate paths before operations; decide whether symlinks are allowed.
+- Consider optional file size caps in addition to output truncation.
+- Return metadata with results: truncated flag, bytes read/written, created flag.
 
 #### Risk Assessment
-**MEDIUM** — The plan is directionally correct, but it currently underspecifies the file-safety and atomicity details that matter most for this phase.
+**MEDIUM** overall. It will work for happy paths, but atomicity and path-safety need tightening before implementation.
 
 ---
 
-### Plan 02-02: Search Tools + Sandbox
+### Plan 02-02: Search + Sandbox
 
 #### Summary
-This plan usefully groups code search and `BashTool` hardening, but the sandbox portion is much weaker than the rest of the phase requires. The search tools are likely implementable with low complexity, yet the blacklist-based shell safety model is brittle and could create false confidence unless its limitations are made explicit.
+This plan covers the required functionality, but the sandbox approach is the weakest part of the phase. `GlobTool` and `GrepTool` are straightforward, but a blacklist-only `BashTool` is fragile and easy to bypass unless the scope is explicitly limited and the threat model is kept intentionally narrow.
 
 #### Strengths
-- Combines related developer-facing tools in one wave, which is sensible for implementation flow.
-- `GlobTool` and `GrepTool` directly support the phase requirement to search the codebase.
-- Truncation is called out for grep output, which is necessary for agent context control.
-- Scope avoids premature MCP work and stays aligned to the current phase boundary.
+- Clear mapping to requirements: glob, grep, bash, basic sandboxing.
+- Using dedicated search tools instead of shelling out for everything is the right design.
+- Output truncation keeps tool responses bounded.
 
 #### Concerns
-- **HIGH**: A command blacklist is not a robust sandbox. It is easy to bypass with shell composition, quoting, alternate binaries, env tricks, or indirect execution.
-- **HIGH**: The phase requirement says destructive operations require interactive confirmation, but this plan replaces that with blocking some commands. Those are not equivalent controls.
-- **MEDIUM**: `GlobTool` does not specify whether it respects ignore rules, hidden files, symlinks, or workspace boundaries.
-- **MEDIUM**: `GrepTool` does not define behavior for binary files, large repositories, invalid regexes, or multiline matching.
-- **MEDIUM**: Depending on implementation, recursive grep over the full tree may be slow or memory-heavy if results are buffered before truncation.
-- **LOW**: Adding "glob and regex dependencies" may be unnecessary if standard ecosystem crates already exist elsewhere in the project; dependency duplication/version drift could appear.
+- **HIGH**: Blacklist-based command filtering is not a meaningful security boundary. Shell escaping, chaining, indirection, and alternate binaries can bypass simple pattern checks.
+- **HIGH**: `BashTool` threat model is unclear. If destructive operations require interactive confirmation, the plan should define how confirmation is requested and enforced in the tool flow.
+- **MEDIUM**: `GlobTool` needs rules for hidden files, symlink traversal, ignored directories, and recursion depth.
+- **MEDIUM**: `GrepTool` needs regex engine constraints. Unbounded regex over large trees can become slow or surprising.
+- **MEDIUM**: Search tools need explicit file/binary handling; grepping binaries or huge generated artifacts will degrade performance.
+- **LOW**: Truncation alone is not enough; result ordering and match caps also matter for usefulness.
 
 #### Suggestions
-- Reframe the `BashTool` change as "basic guardrails" rather than "sandbox," and document that real approval/isolation remains future work.
-- Add an explicit confirmation hook or policy interface for destructive shell commands, even if the first version is minimal.
-- Define search scope rules: workspace root only, whether `.gitignore` is honored, and how symlinks are treated.
-- Stream grep results and stop once output cap is reached rather than collecting full results first.
-- Validate regex input and return structured compile errors.
-- Consider using fast filesystem/search crates that align with Rust async expectations, but avoid overengineering if repo sizes are modest.
+- Treat the blacklist as a temporary UX guard, not real sandboxing; document that explicitly.
+- Add a command execution policy layer:
+  - explicit allow/deny result
+  - reason code
+  - confirmation-required state for risky commands
+- Prefer argument-aware parsing over raw string matching where possible, even in this basic phase.
+- Bound grep execution with max files, max matches, binary-file skip, and ignored-path defaults (`target`, `.git`, etc.).
+- Decide whether search tools follow `.gitignore`; if not, define project-local exclusions explicitly.
+- Return structured grep results: file path, line number, line text, truncated flag.
 
 #### Risk Assessment
-**HIGH** — The search tools are low-risk, but the blacklist approach materially underdelivers on the safety goal and could be misrepresented as stronger protection than it is.
+**HIGH** overall, driven almost entirely by the blacklist-only bash design. Search tools are low-to-medium risk; bash is the main exposure.
 
 ---
 
-### Plan 02-03: Tool Registration
+### Plan 02-03: Integration
 
 #### Summary
-This is the right final integration step and correctly depends on the implementation waves before it, but it is too thin for a plan whose job is to prove the phase works end-to-end. Registration alone will not validate tool schemas, naming consistency, backend compatibility, or actual agent-loop behavior.
+The integration plan is necessary but currently too thin. Exporting tools, registering them, and updating the system prompt are all required, but this plan should also define tool schema consistency, registration tests, and failure handling so the agent loop remains reliable once tools are added.
 
 #### Strengths
-- Correctly sequenced after tool implementation.
-- Keeps integration centralized instead of scattering registrations.
-- Includes an explicit full-suite verification step.
+- Keeps integration concerns separated from tool implementation.
+- Static registration via `AgentBuilder.tool()` matches the project decision and reduces runtime complexity.
+- Prompt updates acknowledge that tool quality depends partly on model guidance.
 
 #### Concerns
-- **MEDIUM**: Registering tools in `src/llm/provider.rs` may be the wrong abstraction boundary if tool availability belongs to agent construction rather than provider selection.
-- **MEDIUM**: No explicit check for tool name/schema alignment between handler registration and model-facing tool definitions.
-- **MEDIUM**: "Run full test suite and verify integration" is too vague to ensure the actual phase goals are covered.
-- **LOW**: If multi-backend support is already complete, touching provider code may create avoidable regression surface in an unrelated area.
+- **MEDIUM**: No mention of integration tests verifying name-to-handler dispatch.
+- **MEDIUM**: No schema/versioning discipline is mentioned; inconsistent tool names or parameter shapes will cause hard-to-debug failures.
+- **MEDIUM**: System prompt updates can become prompt-plumbing if they over-specify tool routing logic.
+- **LOW**: `mod.rs` exports alone do not guarantee clean ownership boundaries or maintainability.
 
 #### Suggestions
-- Verify whether tool registration belongs in a provider layer or in a higher-level agent builder/module. Provider code should ideally not own tool composition unless architecture already dictates that.
-- Add integration tests that exercise the actual dispatch path: model emits tool call -> registry resolves handler -> tool executes -> result returns in expected format.
-- Add backend-agnostic tests ensuring all registered tools are exposed consistently regardless of Anthropic/OpenAI/Ollama selection.
-- Include negative-path integration tests for blocked shell commands and file tool failures, not only happy-path registration.
+- Add an integration test that verifies every registered tool:
+  - has a unique name
+  - round-trips through dispatch
+  - returns structured errors correctly
+- Define a consistent tool result envelope now: `ok`, `error`, `truncated`, optional metadata.
+- Keep the system prompt minimal: describe tool capabilities and safety expectations, not if/else routing rules.
+- Add negative-path tests for unknown tool names, malformed args, and confirmation-required bash commands.
 
 #### Risk Assessment
-**MEDIUM** — The dependency ordering is sound, but the plan is too shallow to guarantee end-to-end correctness without stronger integration verification.
+**MEDIUM** overall. The integration work is not conceptually hard, but thin planning here often causes avoidable reliability issues.
+
+---
+
+## Overall Assessment
+
+The phase plan is mostly aligned with the goals and sensibly scoped for an early tool-use milestone. The strongest parts are the dedicated file/search tools and static registration model. The biggest issue is that two requirements are only partially specified: "atomic file operations" and "destructive operations require interactive confirmation." Right now, file atomicity is not concrete enough, and bash safety is materially underdesigned.
+
+### Cross-cutting Suggestions
+- Define structured tool I/O contracts before implementation.
+- Specify path normalization and workspace-boundary behavior for all filesystem tools.
+- Add integration tests for dispatch, truncation, and failure cases.
+- Explicitly document that blacklist-only bash protection is temporary and not a real sandbox.
 
 ---
 
 ## Consensus Summary
-
-### Overall Assessment
-
-The phase plan is broadly well-scoped and mostly aligned with the Phase 2 goal: give the agent actionable tools without prematurely pulling in deferred systems. The main weakness is that the safety story is currently inconsistent. File tools are close to adequate if atomicity and path-policy details are added, but the `BashTool` blacklist does not satisfy the stated destructive-operation confirmation requirement and should be treated as an interim guardrail, not a sandbox.
 
 ### Agreed Strengths
 - Clear wave ordering with a sensible separation between implementation and integration.
 - Scope discipline is good; deferred MCP work stays deferred.
 - The selected tool set maps well to the stated requirements and immediate agent needs.
 - Truncation is called out for read/grep output (context control).
+- `tokio::fs` is the correct async choice.
+- `EditTool` single replacement pattern is predictable.
 
 ### Agreed Concerns (HIGH Priority)
 1. **Safety model inconsistency**: File tools, shell tools, and confirmation policy are not unified.
 2. **"Atomic" and "interactive confirmation"** appear in goals but are not concretely planned.
 3. **Blacklist is not a sandbox**: Easy to bypass with shell composition, quoting, alternate binaries, env tricks.
-
-### Divergent Views
-None significant - review focused on implementation gaps rather than architectural disagreements.
+4. **EditTool ambiguity**: Needs explicit behavior for zero/multiple matches.
 
 ### Recommended Actions Before Execution
 
 | Priority | Action | Plan Affected |
 |----------|--------|---------------|
 | HIGH | Reframe BashTool blacklist as "basic guardrails" not "sandbox" | 02-02 |
+| HIGH | Add structured outcomes to EditTool (not_found, multiple_matches, success) | 02-01 |
 | MEDIUM | Add integration test for tool dispatch path | 02-03 |
 | MEDIUM | Document what is intentionally deferred (Phase 3) | All |
+| MEDIUM | Define path normalization and workspace-boundary behavior | 02-01 |
 | LOW | Add edge case tests (empty files, symlinks, permissions) | 02-01 |
 
 ---
@@ -142,10 +161,13 @@ The plans are implementable but have documented safety/correctness gaps. Key poi
 1. **Blacklist = Guardrails, not Sandbox** - This is explicitly Phase 3 work per CONTEXT.md
 2. **Atomic writes** - Not required for Phase 2 MVP, can enhance later
 3. **Integration tests** - Should be added during 02-03 execution
+4. **Structured EditTool outcomes** - Already planned (NotFound, MultipleMatches errors)
 
 **Recommendation:** Execute with current plans, document limitations clearly, enhance in Phase 3.
 
+**Overall Risk Assessment:** **MEDIUM-HIGH** — The phase is implementable, but without tightening atomic write semantics and bash safety/confirmation flow, it is likely to meet the demo goal while leaving correctness and security gaps.
+
 ---
 
-*Review completed: 2026-03-23*
+*Review completed: 2026-03-23 10:30*
 *Reviewer: OpenAI Codex (gpt-5.4)*
