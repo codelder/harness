@@ -1,13 +1,17 @@
 use crate::agent::{agent_loop, Message};
 use crate::error::AgentError;
+use crate::planning::TodoManager;
 use reedline::{DefaultPrompt, DefaultPromptSegment, Reedline, Signal};
 use std::io::Write;
+use std::sync::{Arc, Mutex};
 use tracing::{debug, error, info, warn};
 
 /// Interactive REPL session
 pub struct Session {
     messages: Vec<Message>,
     turn_count: u32,
+    todo_manager: Arc<Mutex<TodoManager>>,
+    rounds_since_todo: u32,
 }
 
 impl Session {
@@ -19,7 +23,14 @@ impl Session {
                  Respond naturally to user messages.",
             )],
             turn_count: 0,
+            todo_manager: Arc::new(Mutex::new(TodoManager::new())),
+            rounds_since_todo: 0,
         }
+    }
+
+    /// Get a clone of the shared TodoManager for tool creation
+    pub fn todo_manager(&self) -> Arc<Mutex<TodoManager>> {
+        self.todo_manager.clone()
     }
 
     /// Run the interactive REPL session
@@ -159,5 +170,28 @@ mod tests {
     fn test_system_message_content() {
         let session = Session::new();
         assert!(session.messages[0].content.contains("AI agent"));
+    }
+
+    #[test]
+    fn test_session_rounds_since_todo_initializes_to_zero() {
+        let session = Session::new();
+        assert_eq!(session.rounds_since_todo, 0);
+    }
+
+    #[test]
+    fn test_session_todo_manager_initializes_empty() {
+        let session = Session::new();
+        let manager = session.todo_manager.lock().unwrap();
+        assert!(manager.is_empty());
+    }
+
+    #[test]
+    fn test_session_todo_manager_accessor_returns_shared_reference() {
+        let session = Session::new();
+        let manager1 = session.todo_manager();
+        let manager2 = session.todo_manager();
+
+        // Both should point to the same underlying manager
+        assert!(Arc::ptr_eq(&manager1, &manager2));
     }
 }
