@@ -2,10 +2,10 @@
 
 ## Milestones
 
-- ✅ **v0.1 Foundation** — Phase 1 (shipped 2026-03-22)
-- 🚧 **v0.2 Tool Use** — Phases 2-4 (in progress)
-- 📋 **v1.0 Core** — Phases 5-8 (planned)
-- 📋 **v2.0 Teams** — Phases 9-12 (planned)
+- **v0.1 Foundation** - Phase 1 (shipped 2026-03-22)
+- **v0.2 Tool Use** - Phases 2-4 (in progress)
+- **v1.0 Core** - Phases 5-8 (planned)
+- **v2.0 Teams** - Phases 9-12 (planned)
 
 ## Phases
 
@@ -15,9 +15,9 @@
 - Decimal phases (2.1, 2.2): Urgent insertions (marked with INSERTED)
 
 <details>
-<summary>✅ v0.1 Foundation (Phase 1) — SHIPPED 2026-03-22</summary>
+<summary>v0.1 Foundation (Phase 1) - SHIPPED 2026-03-22</summary>
 
-- [x] **Phase 1: s01 - Agent Loop** — Core agent loop with stop_reason handling (4/4 plans)
+- [x] **Phase 1: s01 - Agent Loop** - Core agent loop with stop_reason handling (4/4 plans)
 
 **Key deliverables:** Agent loop, multi-provider support, error classification, CLI interface
 
@@ -25,20 +25,20 @@ See: [v0.1-ROADMAP.md](milestones/v0.1-ROADMAP.md)
 
 </details>
 
-### 🚧 v0.2 Tool Use (In Progress)
+### v0.2 Tool Use (In Progress)
 
 - [ ] **Phase 2: s02 - Tool Use** - Tool dispatch system and basic file/shell tools
 - [ ] **Phase 3: s03 - TodoWrite** - Task planning with nag reminders
 - [ ] **Phase 4: s04 - Subagents** - Subagent spawning with isolated context
 
-### 📋 v1.0 Core (Planned)
+### v1.0 Core (Planned)
 
 - [ ] **Phase 5: s05 - Skills** - On-demand skill loading via tool_result
 - [ ] **Phase 6: s06 - Context Compact** - Three-layer context compression
 - [ ] **Phase 7: s07 - Tasks** - File-based task graph with dependencies
 - [ ] **Phase 8: s08 - Background Tasks** - Background execution and notifications
 
-### 📋 v2.0 Teams (Planned)
+### v2.0 Teams (Planned)
 
 - [ ] **Phase 9: s09 - Agent Teams** - Multi-agent teams with JSONL mailboxes
 - [ ] **Phase 10: s10 - Team Protocols** - Structured team communication patterns
@@ -63,25 +63,30 @@ See: [v0.1-ROADMAP.md](milestones/v0.1-ROADMAP.md)
 **Plans**: 4 plans in 4 waves
 
 Plans:
-- [x] 01-01-PLAN.md — Project foundation & error infrastructure (Wave 0)
-- [x] 01-02-PLAN.md — LLM provider layer (Wave 1)
-- [x] 01-03-PLAN.md — Agent loop core (Wave 2)
-- [x] 01-04-PLAN.md — CLI session interface (Wave 3)
+- [x] 01-01-PLAN.md - Project foundation & error infrastructure (Wave 0)
+- [x] 01-02-PLAN.md - LLM provider layer (Wave 1)
+- [x] 01-03-PLAN.md - Agent loop core (Wave 2)
+- [x] 01-04-PLAN.md - CLI session interface (Wave 3)
 
 ### Phase 2: s02 - Tool Use
 
 **Goal**: Agent can execute actions through registered tool handlers
 **Depends on**: Phase 1
-**Requirements**: CORE-02, CORE-03, CORE-04, CORE-05 (complete), PLAN-05, PERS-04 (partial), CROSS-01, CROSS-02, CROSS-03, CROSS-04
+**Requirements**: CORE-02, CORE-03, CORE-04, CORE-05, PLAN-05, PERS-04
 **Success Criteria** (what must be TRUE):
 
   1. Tool dispatch registry maps tool names to async handlers
   2. Agent can read, write, and edit files atomically
   3. Agent can search codebase using glob and grep patterns
   4. Agent can switch between multiple LLM backends (Anthropic, OpenAI, Ollama)
-  5. Destructive operations require interactive confirmation
-  6. MCP protocol support enables external tool integration
-**Plans**: TBD
+  5. Destructive operations require interactive confirmation (basic blacklist)
+  6. ~~MCP protocol support enables external tool integration~~ (DEFERRED to Phase 3+)
+**Plans**: 3 plans in 2 waves
+
+Plans:
+- [ ] 02-01-PLAN.md - File tools (Read, Write, Edit) - Wave 1
+- [ ] 02-02-PLAN.md - Search tools (Glob, Grep) + BashTool blacklist - Wave 1
+- [ ] 02-03-PLAN.md - Tool registration and integration - Wave 2
 
 ### Phase 3: s03 - TodoWrite
 
@@ -216,12 +221,12 @@ Plans:
 ## Progress
 
 **Execution Order:**
-Phases execute in numeric order: 1 → 2 → 3 → ... → 12
+Phases execute in numeric order: 1 -> 2 -> 3 -> ... -> 12
 
 | Phase | Plans Complete | Status | Completed |
 |-------|----------------|--------|-----------|
 | 1. s01 - Agent Loop | 4/4 | Complete | 2026-03-21 |
-| 2. s02 - Tool Use | 0/TBD | Ready for execution | - |
+| 2. s02 - Tool Use | 0/3 | Ready for execution | - |
 | 3. s03 - TodoWrite | 0/TBD | Not started | - |
 | 4. s04 - Subagents | 0/TBD | Not started | - |
 | 5. s05 - Skills | 0/TBD | Not started | - |
