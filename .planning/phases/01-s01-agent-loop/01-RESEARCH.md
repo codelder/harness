@@ -13,7 +13,7 @@
 - Support all three providers in Phase 1: Anthropic, OpenAI, Ollama
 - Use rig-core's multi-provider abstraction layer
 - Provider selection via CLI flag: `--provider anthropic|openai|ollama`
-- API keys from environment variables: `ANTHROPIC_API_KEY`, `OPENAI_API_KEY`
+- API keys from environment variables: `HARNESS_ANTHROPIC_KEY`, `HARNESS_OPENAI_KEY`
 
 **CLI Interaction Mode**
 - REPL-style interactive session (not single-shot command)

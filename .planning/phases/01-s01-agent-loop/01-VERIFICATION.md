@@ -139,7 +139,7 @@ human_verification:
 ### Human Verification Required
 
 1. **Interactive CLI Session**
-   - **Test:** Run `cargo run --release` with valid ANTHROPIC_API_KEY
+   - **Test:** Run `cargo run --release` with valid HARNESS_ANTHROPIC_KEY
    - **Expected:** Welcome message, You: prompt, can type and receive responses
    - **Why human:** Requires API key and visual verification of REPL behavior
 
@@ -149,7 +149,7 @@ human_verification:
    - **Why human:** Interactive signal handling verification
 
 3. **Error Handling Without API Key**
-   - **Test:** Run without setting ANTHROPIC_API_KEY
+   - **Test:** Run without setting HARNESS_ANTHROPIC_KEY
    - **Expected:** Clear error message: "Missing API key for anthropic"
    - **Why human:** User-facing error message clarity verification
 

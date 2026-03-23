@@ -164,7 +164,7 @@ tokio-test = "0.4"
 
 **If targeting only Anthropic Claude:**
 - Use `rig-core` with `rig::providers::anthropic` module
-- API key via `ANTHROPIC_API_KEY` environment variable
+- API key via `HARNESS_ANTHROPIC_KEY` environment variable
 - Streaming built-in
 
 **If targeting local models (Ollama):**

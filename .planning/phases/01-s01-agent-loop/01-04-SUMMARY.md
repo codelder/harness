@@ -133,8 +133,8 @@ None - all blocking issues were auto-fixed per deviation rules.
 ## User Setup Required
 
 None - no external service configuration required. However, to use the CLI with actual LLM providers, users must set environment variables:
-- `ANTHROPIC_API_KEY` for Anthropic provider
-- `OPENAI_API_KEY` for OpenAI provider
+- `HARNESS_ANTHROPIC_KEY` for Anthropic provider
+- `HARNESS_OPENAI_KEY` for OpenAI provider
 
 ## Next Phase Readiness
 

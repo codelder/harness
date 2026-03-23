@@ -33,8 +33,8 @@ LLM becomes an agent through core loop that processes responses until text outpu
 - Support all three providers in Phase 1: Anthropic, OpenAI, Ollama
 - Use rig-core's multi-provider abstraction layer
 - Provider selection via CLI flag: `--provider anthropic|openai|ollama`
-- API keys from environment variables: `ANTHROPIC_API_KEY`, `OPENAI_API_KEY`
-- Custom base URL via CLI flag `--base-url` or environment variables `ANTHROPIC_BASE_URL` / `OPENAI_BASE_URL`
+- API keys from environment variables: `HARNESS_ANTHROPIC_KEY`, `HARNESS_OPENAI_KEY`
+- Custom base URL via CLI flag `--base-url` or environment variables `HARNESS_ANTHROPIC_URL` / `HARNESS_OPENAI_URL`
 - Priority: CLI argument > environment variable > default
 
 ### Tool Support

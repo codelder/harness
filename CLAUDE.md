@@ -116,6 +116,8 @@ cargo run            # Run CLI
 ## API Keys
 
 Set via environment variables:
-- `ANTHROPIC_API_KEY` — Anthropic Claude
-- `OPENAI_API_KEY` — OpenAI models
+- `HARNESS_ANTHROPIC_KEY` — Anthropic Claude API key
+- `HARNESS_ANTHROPIC_URL` — Anthropic base URL (optional, for proxies)
+- `HARNESS_OPENAI_KEY` — OpenAI API key
+- `HARNESS_OPENAI_URL` — OpenAI base URL (optional, for proxies)
 - Ollama runs locally, no key needed
