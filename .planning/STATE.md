@@ -2,13 +2,13 @@
 gsd_state_version: 1.0
 milestone: v0.2
 milestone_name: Tool Use
-status: Ready to execute
-last_updated: "2026-03-23T02:03:33.119Z"
+status: Phase complete — ready for verification
+last_updated: "2026-03-23T02:07:57.107Z"
 progress:
   total_phases: 2
-  completed_phases: 1
+  completed_phases: 2
   total_plans: 7
-  completed_plans: 6
+  completed_plans: 7
 ---
 
 # Project State
@@ -53,6 +53,7 @@ Plan: 3 of 3
 
 | Phase 02-s02-tool-use P01 | 253 | 3 tasks | 5 files |
 | Phase 02-s02-tool-use P02-02 | 270 | 4 tasks | 5 files |
+| Phase 02-s02-tool-use P02-03 | 3min | 3 tasks | 1 files |
 
 ## Accumulated Context
 
@@ -85,6 +86,8 @@ Recent decisions affecting current work:
 - [Phase 02-s02-tool-use]: 50K character output limit for GrepTool prevents context explosion
 - [Phase 02-s02-tool-use]: Command blacklist approach for BashTool safety (simple, effective)
 - [Phase 02-s02-tool-use]: GlobTool uses sync operations in async context (fast enough, no blocking)
+- [Phase 02-s02-tool-use]: All tools registered statically via AgentBuilder.tool() chain for both Anthropic and OpenAI providers
+- [Phase 02-s02-tool-use]: SYSTEM_PROMPT updated to list all six tools (bash, read, write, edit, glob, grep) with descriptions
 
 ### Pending Todos
 
@@ -96,6 +99,6 @@ None.
 
 ## Session Continuity
 
-Last session: 2026-03-23T02:03:33.117Z
+Last session: 2026-03-23T02:07:57.105Z
 Action: Phase 2 discuss-phase complete, CONTEXT.md created
 Resume: `/gsd:plan-phase 2` to create execution plans

@@ -17,13 +17,13 @@ Requirements for next milestone. Each maps to roadmap phases.
 
 ### Phase 2: s02 - Tool Use
 
-- [ ] **CORE-02**: Tool dispatch system with handler registration — dispatch map: name -> handler function
-- [ ] **CORE-03**: Bash tool for command execution — execute shell commands with output capture
+- [x] **CORE-02**: Tool dispatch system with handler registration — dispatch map: name -> handler function
+- [x] **CORE-03**: Bash tool for command execution — execute shell commands with output capture
 - [x] **CORE-04**: Read/Write/Edit file tools — atomic file operations for code manipulation
 - [x] **CORE-05**: Multi-backend LLM provider — complete multi-provider support (Anthropic, OpenAI, Ollama)
 - [x] **PLAN-05**: Glob/Grep tools for code search — pattern matching for file discovery
 - [x] **PERS-04**: Sandbox execution with interactive confirmation — nix/seccomp isolation, confirm for system access (partial: basic sandbox)
-- [ ] **CROSS-01**: MCP protocol support via rmcp — Model Context Protocol for extensibility
+- [x] **CROSS-01**: MCP protocol support via rmcp — Model Context Protocol for extensibility
 
 ### Phase 3: s03 - TodoWrite
 
@@ -113,13 +113,13 @@ Which phases cover which requirements. Updated during roadmap creation.
 | ~~CROSS-02~~ | ~~Phase 1~~ | ✅ Archived (v0.1) |
 | ~~CROSS-03~~ | ~~Phase 1~~ | ✅ Archived (v0.1) |
 | ~~CROSS-04~~ | ~~Phase 1~~ | ✅ Archived (v0.1) |
-| CORE-02 | Phase 2 | Pending |
-| CORE-03 | Phase 2 | Pending |
+| CORE-02 | Phase 2 | Complete |
+| CORE-03 | Phase 2 | Complete |
 | CORE-04 | Phase 2 | Complete |
 | CORE-05 (complete) | Phase 2 | Pending |
 | PLAN-05 | Phase 2 | Complete |
 | PERS-04 (partial) | Phase 2 | Pending |
-| CROSS-01 | Phase 2 | Pending |
+| CROSS-01 | Phase 2 | Complete |
 | PLAN-01 | Phase 3 | Pending |
 | PLAN-02 | Phase 4 | Pending |
 | PLAN-03 | Phase 5 | Pending |
