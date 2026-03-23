@@ -22,7 +22,7 @@ pub struct TodoItemInput {
     /// Task description
     pub text: String,
     /// Task status: pending, in_progress, completed
-    pub status: String,
+    pub status: TodoStatus,
 }
 
 /// Todo tool for task management
@@ -86,11 +86,10 @@ Usage notes:
             if text.is_empty() {
                 return Err(TodoError::MissingText(input.id));
             }
-            let status = input.status.parse::<TodoStatus>()?;
             items.push(TodoItem {
                 id: input.id,
                 text: text.to_string(),
-                status,
+                status: input.status,
             });
         }
 
@@ -128,12 +127,12 @@ mod tests {
                 TodoItemInput {
                     id: 1,
                     text: "First task".to_string(),
-                    status: "pending".to_string(),
+                    status: TodoStatus::Pending,
                 },
                 TodoItemInput {
                     id: 2,
                     text: "Second task".to_string(),
-                    status: "in_progress".to_string(),
+                    status: TodoStatus::InProgress,
                 },
             ],
         };
@@ -150,7 +149,7 @@ mod tests {
             .map(|id| TodoItemInput {
                 id,
                 text: format!("Task {}", id),
-                status: "pending".to_string(),
+                status: TodoStatus::Pending,
             })
             .collect();
 
@@ -167,12 +166,12 @@ mod tests {
                 TodoItemInput {
                     id: 1,
                     text: "Task 1".to_string(),
-                    status: "in_progress".to_string(),
+                    status: TodoStatus::InProgress,
                 },
                 TodoItemInput {
                     id: 2,
                     text: "Task 2".to_string(),
-                    status: "in_progress".to_string(),
+                    status: TodoStatus::InProgress,
                 },
             ],
         };
@@ -182,18 +181,18 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn test_todo_tool_call_invalid_status() {
+    async fn test_todo_tool_call_completed_status() {
         let tool = TodoTool::with_fresh_manager();
         let args = TodoArgs {
             items: vec![TodoItemInput {
                 id: 1,
                 text: "Task 1".to_string(),
-                status: "invalid_status".to_string(),
+                status: TodoStatus::Completed,
             }],
         };
 
-        let result = tool.call(args).await;
-        assert!(matches!(result, Err(TodoError::InvalidStatus(_))));
+        let result = tool.call(args).await.unwrap();
+        assert!(result.contains("[x] #1: Task 1"));
     }
 
     #[tokio::test]

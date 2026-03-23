@@ -1,10 +1,13 @@
 use std::str::FromStr;
+use serde::{Deserialize, Serialize};
+use schemars::JsonSchema;
 
 /// Maximum number of todo items allowed
 const MAX_ITEMS: usize = 20;
 
 /// Task status enum
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "snake_case")]
 pub enum TodoStatus {
     Pending,
     InProgress,
