@@ -21,7 +21,7 @@ Requirements for next milestone. Each maps to roadmap phases.
 
 ### Phase 3: s03 - TodoWrite
 
-- [ ] **PLAN-01**: TodoWrite with nag reminders — task list that reminds agent of pending work
+- [x] **PLAN-01**: TodoWrite with nag reminders — task list that reminds agent of pending work
   - TodoManager state management (pending/in_progress/completed)
   - Maximum 20 todos constraint
   - Only one in_progress task at a time

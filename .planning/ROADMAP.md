@@ -38,7 +38,7 @@ See: [v0.2-ROADMAP.md](milestones/v0.2-ROADMAP.md)
 - [ ] **Phase 3: s03 - TodoWrite** — Task planning with nag reminders (0/4 plans)
 
 Plans:
-- [ ] 03-01-PLAN.md — TodoManager core state management with constraint validation
+- [x] 03-01-PLAN.md — TodoManager core state management with constraint validation
 - [ ] 03-02-PLAN.md — TodoTool with Arc<Mutex<TodoManager>> for shared state
 - [ ] 03-03-PLAN.md — Session integration with nag reminder
 - [ ] 03-04-PLAN.md — Provider wiring and round counter reset
