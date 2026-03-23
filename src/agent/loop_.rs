@@ -1,5 +1,7 @@
 use super::{AgentTurn, Message, Role};
 use crate::error::{classify_prompt_error, AgentError};
+use rig::completion::CompletionModel;
+use rig::agent::{PromptHook, ToolCallHookAction};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 use std::time::Duration;
@@ -16,10 +18,9 @@ const INITIAL_DELAY: Duration = Duration::from_secs(1);
 /// This implements direct tool call detection (per Python reference implementation)
 /// instead of indirect detection via TodoManager state changes.
 ///
-/// The actual `impl PromptHook` must be in provider.rs because:
-/// 1. PromptHook is generic over the CompletionModel type
-/// 2. The model type is only known at provider creation time
-/// 3. This keeps loop_.rs provider-agnostic
+/// The PromptHook trait is implemented generically for all CompletionModel types,
+/// allowing this hook to work with both Anthropic and OpenAI providers.
+#[derive(Clone)]
 pub struct TodoUsageHook {
     /// Flag set to true when todo tool is called
     used_todo: Arc<AtomicBool>,
@@ -42,6 +43,31 @@ impl TodoUsageHook {
 impl Default for TodoUsageHook {
     fn default() -> Self {
         Self::new().0
+    }
+}
+
+impl<M> PromptHook<M> for TodoUsageHook
+where
+    M: CompletionModel,
+{
+    /// Called when a tool is invoked during agent execution.
+    ///
+    /// This is the DIRECT tool usage detection mechanism (per Python approach).
+    /// When the todo tool is called, we set the flag to true.
+    async fn on_tool_call(
+        &self,
+        tool_name: &str,
+        _tool_call_id: Option<String>,
+        _internal_call_id: &str,
+        _args: &str,
+    ) -> ToolCallHookAction {
+        // Direct detection: if todo tool is called, set the flag
+        // This is equivalent to Python's: used_todo = True
+        if tool_name == "todo" {
+            self.used_todo.store(true, Ordering::SeqCst);
+        }
+        // Always continue with tool execution
+        ToolCallHookAction::cont()
     }
 }
 
