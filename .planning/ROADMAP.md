@@ -4,7 +4,7 @@
 
 - ✅ **v0.1 Foundation** — Phase 1 (shipped 2026-03-22)
 - ✅ **v0.2 Tool Use** — Phase 2 (shipped 2026-03-23)
-- 🚧 **v0.3 TodoWrite** — Phase 3 + 03.1 code review fixes (in progress)
+- ✅ **v0.3 TodoWrite** — Phase 3 + 03.1 code review fixes (shipped 2026-03-24)
 - 📋 **v0.4 Subagents** — Phase 4 (planned)
 - 📋 **v1.0 Core** — Phases 5-8 (planned)
 - 📋 **v2.0 Teams** — Phases 9-12 (planned)
@@ -36,14 +36,14 @@ See: [v0.2-ROADMAP.md](milestones/v0.2-ROADMAP.md)
 ### 🚧 v0.3 TodoWrite (In Progress)
 
 - [x] **Phase 3: s03 - TodoWrite** — Task planning with nag reminders (4/4 plans) ✅ 2026-03-24
-- [ ] **Phase 03.1: Code Review Fixes** — Address issues from cross-AI review (0/1 plans)
+- [x] **Phase 03.1: Code Review Fixes** — Address issues from cross-AI review (1/1 plans) ✅ 2026-03-24
 
 Plans:
 - [x] 03-01-PLAN.md — TodoManager core state management with constraint validation
 - [x] 03-02-PLAN.md — TodoTool with Arc<Mutex<TodoManager>> for shared state
 - [x] 03-03-PLAN.md — Session integration with nag reminder
 - [x] 03-04-PLAN.md — Provider wiring and round counter reset
-- [ ] 03.1-01-PLAN.md — Fix async mutex, error handling, API consistency issues
+- [x] 03.1-01-PLAN.md — Fix async mutex, error handling, API consistency issues
 
 ### 📋 v0.4 Subagents (Planned)
 
@@ -223,7 +223,7 @@ Plans:
 | 1. s01 - Agent Loop | v0.1 | 4/4 | Complete | 2026-03-21 |
 | 2. s02 - Tool Use | v0.2 | 3/3 | Complete | 2026-03-23 |
 | 3. s03 - TodoWrite | v0.3 | 4/4 | Complete | 2026-03-24 |
-| 3.1 Code Review Fixes | v0.3 | 0/1 | In Progress | - |
+| 3.1 Code Review Fixes | v0.3 | 1/1 | Complete | 2026-03-24 |
 | 4. s04 - Subagents | v0.4 | 0/TBD | Not started | - |
 | 5. s05 - Skills | v1.0 | 0/TBD | Not started | - |
 | 6. s06 - Context Compact | v1.0 | 0/TBD | Not started | - |
