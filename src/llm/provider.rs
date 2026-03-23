@@ -1,8 +1,9 @@
 use crate::error::ProviderError;
 use crate::tools::{BashTool, ReadTool, WriteTool, EditTool, GlobTool, GrepTool, TodoTool};
 use crate::planning::TodoManager;
+use crate::agent::TodoUsageHook;
 use std::sync::{Arc, Mutex};
-use rig::agent::{Agent, AgentBuilder};
+use rig::agent::{Agent, AgentBuilder, PromptRequest};
 use rig::client::CompletionClient;
 use rig::completion::{Chat, Message, PromptError};
 use rig::providers::openai::responses_api::ResponsesCompletionModel;
@@ -133,6 +134,51 @@ impl LlmProvider {
             }
             LlmProvider::Openai(agent) => {
                 agent.chat(prompt.into(), chat_history).await
+            }
+            LlmProvider::Ollama => {
+                Err(PromptError::CompletionError(
+                    rig::completion::CompletionError::ResponseError(
+                        "Ollama provider not yet implemented".to_string()
+                    )
+                ))
+            }
+        }
+    }
+
+    /// Send a chat message with history and a hook for observing tool calls
+    ///
+    /// This method uses rig's PromptRequest API with hook support,
+    /// which is required for direct tool usage detection.
+    ///
+    /// # Arguments
+    /// * `prompt` - The prompt message to send
+    /// * `chat_history` - Previous conversation history as rig Messages
+    /// * `hook` - Hook for observing tool calls (e.g., TodoUsageHook)
+    ///
+    /// # Returns
+    /// The LLM's response as a string
+    ///
+    /// # Errors
+    /// Returns PromptError if the request fails
+    pub async fn chat_with_history_and_hook(
+        &self,
+        prompt: impl Into<String>,
+        chat_history: Vec<Message>,
+        hook: TodoUsageHook,
+    ) -> Result<String, PromptError> {
+        match self {
+            LlmProvider::Anthropic(agent) => {
+                // Use PromptRequest with hook instead of agent.chat()
+                PromptRequest::from_agent(agent, prompt.into())
+                    .with_history(&mut chat_history.clone())
+                    .with_hook(hook)
+                    .await
+            }
+            LlmProvider::Openai(agent) => {
+                PromptRequest::from_agent(agent, prompt.into())
+                    .with_history(&mut chat_history.clone())
+                    .with_hook(hook)
+                    .await
             }
             LlmProvider::Ollama => {
                 Err(PromptError::CompletionError(
