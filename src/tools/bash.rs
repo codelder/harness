@@ -2,7 +2,8 @@ use rig::tool::Tool;
 use rig::completion::ToolDefinition;
 use serde::{Deserialize, Serialize};
 use schemars::JsonSchema;
-use std::process::Command;
+use tokio::process::Command;
+use std::time::Duration;
 
 /// Arguments for the Bash tool
 #[derive(Debug, Clone, Deserialize, JsonSchema)]
@@ -29,9 +30,6 @@ pub enum BashError {
 
     #[error("Command was terminated by signal")]
     Terminated,
-
-    #[error("Invalid UTF-8 in command output")]
-    InvalidUtf8,
 
     #[error("Command blocked by safety filter: {0}")]
     Blocked(String),
@@ -66,7 +64,7 @@ Usage notes:
     }
 
     async fn call(&self, args: Self::Args) -> Result<Self::Output, Self::Error> {
-        tracing::info!("Executing bash command: {}", args.command);
+        tracing::info!("Executing bash command: {} (timeout: {}s)", args.command, args.timeout);
 
         // Safety blacklist check
         let dangerous_patterns = [
@@ -90,11 +88,20 @@ Usage notes:
             }
         }
 
-        let output = Command::new("bash")
-            .arg("-c")
-            .arg(&args.command)
-            .output()
-            .map_err(|e| BashError::ExecutionFailed(e.to_string()))?;
+        // Execute with timeout
+        let mut cmd = Command::new("bash");
+        cmd.arg("-c").arg(&args.command);
+
+        let result = tokio::time::timeout(
+            Duration::from_secs(args.timeout),
+            cmd.output()
+        ).await;
+
+        let output = match result {
+            Ok(Ok(output)) => output,
+            Ok(Err(e)) => return Err(BashError::ExecutionFailed(e.to_string())),
+            Err(_) => return Err(BashError::Timeout(args.timeout)),
+        };
 
         let stdout = String::from_utf8_lossy(&output.stdout);
         let stderr = String::from_utf8_lossy(&output.stderr);
@@ -226,5 +233,21 @@ mod tests {
         assert!(result.is_ok());
         let output = result.unwrap();
         assert!(output.contains("total"));
+    }
+
+    #[tokio::test]
+    async fn test_bash_tool_timeout() {
+        let tool = BashTool;
+        // Use a command that sleeps for 60 seconds with a 1-second timeout
+        let args = BashArgs {
+            command: "sleep 60".to_string(),
+            timeout: 1,
+        };
+        let result = tool.call(args).await;
+        assert!(result.is_err());
+        match result.unwrap_err() {
+            BashError::Timeout(secs) => assert_eq!(secs, 1),
+            _ => panic!("Expected Timeout error"),
+        }
     }
 }
