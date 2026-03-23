@@ -85,7 +85,7 @@ Plans:
 
 Plans:
 - [x] 02-01-PLAN.md - File tools (Read, Write, Edit) - Wave 1
-- [ ] 02-02-PLAN.md - Search tools (Glob, Grep) + BashTool blacklist - Wave 1
+- [x] 02-02-PLAN.md - Search tools (Glob, Grep) + BashTool blacklist - Wave 1
 - [ ] 02-03-PLAN.md - Tool registration and integration - Wave 2
 
 ### Phase 3: s03 - TodoWrite

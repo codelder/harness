@@ -21,8 +21,8 @@ Requirements for next milestone. Each maps to roadmap phases.
 - [ ] **CORE-03**: Bash tool for command execution — execute shell commands with output capture
 - [x] **CORE-04**: Read/Write/Edit file tools — atomic file operations for code manipulation
 - [x] **CORE-05**: Multi-backend LLM provider — complete multi-provider support (Anthropic, OpenAI, Ollama)
-- [ ] **PLAN-05**: Glob/Grep tools for code search — pattern matching for file discovery
-- [ ] **PERS-04**: Sandbox execution with interactive confirmation — nix/seccomp isolation, confirm for system access (partial: basic sandbox)
+- [x] **PLAN-05**: Glob/Grep tools for code search — pattern matching for file discovery
+- [x] **PERS-04**: Sandbox execution with interactive confirmation — nix/seccomp isolation, confirm for system access (partial: basic sandbox)
 - [ ] **CROSS-01**: MCP protocol support via rmcp — Model Context Protocol for extensibility
 
 ### Phase 3: s03 - TodoWrite
@@ -49,7 +49,7 @@ Requirements for next milestone. Each maps to roadmap phases.
 
 - [ ] **PERS-02**: Background task execution with daemon threads — tokio::spawn for async operations
 - [ ] **PERS-03**: Notification queue for completion events — inject results when background tasks finish
-- [ ] **PERS-04**: Sandbox execution with interactive confirmation — complete sandbox implementation
+- [x] **PERS-04**: Sandbox execution with interactive confirmation — complete sandbox implementation
 
 ### Phase 9: s09 - Agent Teams
 
@@ -117,7 +117,7 @@ Which phases cover which requirements. Updated during roadmap creation.
 | CORE-03 | Phase 2 | Pending |
 | CORE-04 | Phase 2 | Complete |
 | CORE-05 (complete) | Phase 2 | Pending |
-| PLAN-05 | Phase 2 | Pending |
+| PLAN-05 | Phase 2 | Complete |
 | PERS-04 (partial) | Phase 2 | Pending |
 | CROSS-01 | Phase 2 | Pending |
 | PLAN-01 | Phase 3 | Pending |

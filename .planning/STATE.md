@@ -3,12 +3,12 @@ gsd_state_version: 1.0
 milestone: v0.2
 milestone_name: Tool Use
 status: Ready to execute
-last_updated: "2026-03-23T01:57:32.548Z"
+last_updated: "2026-03-23T02:03:33.119Z"
 progress:
   total_phases: 2
   completed_phases: 1
   total_plans: 7
-  completed_plans: 5
+  completed_plans: 6
 ---
 
 # Project State
@@ -30,7 +30,7 @@ See: .planning/PROJECT.md (updated 2025-03-20)
 ## Current Position
 
 Phase: 02 (s02-tool-use) — EXECUTING
-Plan: 2 of 3
+Plan: 3 of 3
 
 ## Performance Metrics
 
@@ -52,6 +52,7 @@ Plan: 2 of 3
 - Trend: Accelerating after foundation work
 
 | Phase 02-s02-tool-use P01 | 253 | 3 tasks | 5 files |
+| Phase 02-s02-tool-use P02-02 | 270 | 4 tasks | 5 files |
 
 ## Accumulated Context
 
@@ -81,6 +82,9 @@ Recent decisions affecting current work:
 - [Phase 02]: Use tempfile dev-dependency for isolated test fixtures
 - [Phase 02]: Keep MAX_OUTPUT_CHARS at 50K to match Python tutorial default
 - [Phase 02]: Use match_indices() for EditTool single-match validation
+- [Phase 02-s02-tool-use]: 50K character output limit for GrepTool prevents context explosion
+- [Phase 02-s02-tool-use]: Command blacklist approach for BashTool safety (simple, effective)
+- [Phase 02-s02-tool-use]: GlobTool uses sync operations in async context (fast enough, no blocking)
 
 ### Pending Todos
 
@@ -92,6 +96,6 @@ None.
 
 ## Session Continuity
 
-Last session: 2026-03-23T01:57:32.545Z
+Last session: 2026-03-23T02:03:33.117Z
 Action: Phase 2 discuss-phase complete, CONTEXT.md created
 Resume: `/gsd:plan-phase 2` to create execution plans
