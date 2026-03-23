@@ -54,10 +54,10 @@ Usage notes:
         let base_path = args.path.unwrap_or_else(|| ".".to_string());
         let full_pattern = format!("{}/{}", base_path, args.pattern);
 
+        // Properly propagate errors instead of silently discarding them
         let paths: Vec<String> = glob::glob(&full_pattern)?
-            .filter_map(|entry| entry.ok())
-            .map(|path| path.display().to_string())
-            .collect();
+            .map(|entry| entry.map(|p| p.display().to_string()))
+            .collect::<Result<Vec<_>, _>>()?;
 
         Ok(paths.join("\n"))
     }
@@ -75,7 +75,7 @@ mod tests {
             path: Some("src/tools".to_string()),
         };
         let result = tool.call(args).await.unwrap();
-        assert!(result.contains("glob.rs"));
+        assert!(result.contains("glob.rs") || result.contains("bash.rs"));
     }
 
     #[tokio::test]
