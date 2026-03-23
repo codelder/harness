@@ -2,9 +2,9 @@
 gsd_state_version: 1.0
 milestone: v0.2
 milestone_name: tool-use
-status: ready
-stopped_at: v0.1 Foundation archived
-last_updated: "2026-03-22T21:45:00Z"
+status: active
+stopped_at: null
+last_updated: "2026-03-23T08:30:00Z"
 progress:
   total_phases: 12
   completed_phases: 1
@@ -19,7 +19,7 @@ progress:
 See: .planning/PROJECT.md (updated 2025-03-20)
 
 **Core value:** Performance and safety without sacrificing capability
-**Current focus:** Phase 02 — s02-tool-dispatch (ready to start)
+**Current focus:** Phase 02 — s02-tool-use (context gathered)
 
 ## Milestone History
 
@@ -30,8 +30,8 @@ See: .planning/PROJECT.md (updated 2025-03-20)
 
 ## Current Position
 
-**Phase:** Ready to start Phase 2 (s02-tool-dispatch)
-**Next step:** `/gsd:discuss-phase 2` or `/gsd:plan-phase 2`
+**Phase:** Phase 2 (s02-tool-use) — Context gathered, ready to plan
+**Next step:** `/gsd:plan-phase 2`
 
 ## Performance Metrics
 
@@ -72,6 +72,11 @@ Recent decisions affecting current work:
 - [01-04]: Use std::pin::pin! macro for ctrl_c future (tokio::select! requires Unpin)
 - [01-04]: Use tracing_subscriber::prelude::* for SubscriberExt trait
 - [01-04]: Handle io::Error inside select block instead of propagating
+- [02-CONTEXT]: Core tools statically compiled via AgentBuilder.tool() (Bash, Read, Write, Edit, Glob, Grep)
+- [02-CONTEXT]: MCP/Skills dynamic extension deferred to Phase 3+
+- [02-CONTEXT]: File output limit configurable via CLI or config file
+- [02-CONTEXT]: Basic sandbox via command blacklist in BashTool (rm -rf /, sudo, mkfs, etc.)
+- [02-CONTEXT]: Full sandbox (path sanitization, allowlist, HITL) deferred to Phase 3
 
 ### Pending Todos
 
@@ -83,6 +88,6 @@ None.
 
 ## Session Continuity
 
-Last session: 2026-03-22T21:45:00Z
-Action: v0.1 Foundation archived
-Resume: `/gsd:plan-phase 2` to start Tool Use phase
+Last session: 2026-03-23T08:30:00Z
+Action: Phase 2 discuss-phase complete, CONTEXT.md created
+Resume: `/gsd:plan-phase 2` to create execution plans
