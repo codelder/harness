@@ -2,8 +2,8 @@
 gsd_state_version: 1.0
 milestone: v0.2
 milestone_name: Tool Use
-status: Phase complete — ready for verification
-last_updated: "2026-03-23T02:07:57.107Z"
+status: Milestone complete
+last_updated: "2026-03-23T02:13:24.395Z"
 progress:
   total_phases: 2
   completed_phases: 2
@@ -29,8 +29,8 @@ See: .planning/PROJECT.md (updated 2025-03-20)
 
 ## Current Position
 
-Phase: 02 (s02-tool-use) — EXECUTING
-Plan: 3 of 3
+Phase: 02
+Plan: Not started
 
 ## Performance Metrics
 
@@ -88,6 +88,10 @@ Recent decisions affecting current work:
 - [Phase 02-s02-tool-use]: GlobTool uses sync operations in async context (fast enough, no blocking)
 - [Phase 02-s02-tool-use]: All tools registered statically via AgentBuilder.tool() chain for both Anthropic and OpenAI providers
 - [Phase 02-s02-tool-use]: SYSTEM_PROMPT updated to list all six tools (bash, read, write, edit, glob, grep) with descriptions
+- [260323-f25]: BashTool timeout enforced via tokio::time::timeout (was declared but not implemented)
+- [260323-f25]: GlobTool propagates errors instead of silently discarding via filter_map
+- [260323-f25]: GrepTool docs updated to reflect single-file-only behavior
+- [260323-f25]: Removed unused error variants (ReadError::InvalidPath, BashError::InvalidUtf8)
 
 ### Pending Todos
 
@@ -97,8 +101,12 @@ None.
 
 None.
 
+### Quick Tasks Completed
+
+| # | Description | Date | Commit | Status | Directory |
+|---|-------------|------|--------|--------|-----------|
+| 260323-f25 | Fix Phase 2 tool issues from code review | 2026-03-23 | d866d1d | Verified | [260323-f25-fix-phase-2-tool-issues-from-code-review](./quick/260323-f25-fix-phase-2-tool-issues-from-code-review/) |
+
 ## Session Continuity
 
-Last session: 2026-03-23T02:07:57.105Z
-Action: Phase 2 discuss-phase complete, CONTEXT.md created
-Resume: `/gsd:plan-phase 2` to create execution plans
+Last activity: 2026-03-23 - Completed quick task 260323-f25: Fix Phase 2 tool issues from code review
