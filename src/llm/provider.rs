@@ -1,5 +1,5 @@
 use crate::error::ProviderError;
-use crate::tools::BashTool;
+use crate::tools::{BashTool, ReadTool, WriteTool, EditTool, GlobTool, GrepTool};
 use rig::agent::{Agent, AgentBuilder};
 use rig::client::CompletionClient;
 use rig::completion::{Chat, Message, PromptError};
@@ -7,14 +7,17 @@ use rig::providers::openai::responses_api::ResponsesCompletionModel;
 use rig::providers::{anthropic, openai};
 
 /// System prompt for the agent
-const SYSTEM_PROMPT: &str = r#"You are an AI agent with access to a bash tool for executing commands.
+const SYSTEM_PROMPT: &str = r#"You are an AI agent with access to tools for interacting with the system.
 
-You can use the bash tool to:
-- Run shell commands for file operations
-- Check system information
-- Execute scripts and programs
+Available tools:
+- bash: Execute shell commands
+- read: Read file contents
+- write: Create or overwrite files
+- edit: Perform precise string replacements in files
+- glob: Find files matching patterns
+- grep: Search file contents with regex
 
-Use the bash tool when you need to interact with the system, then provide your response based on the results."#;
+Use these tools to interact with the system and accomplish tasks."#;
 
 /// Maximum number of tool-calling turns before returning to the user
 const DEFAULT_MAX_TURNS: usize = 50;
@@ -177,11 +180,16 @@ pub fn create_provider(
             // Create completion model
             let completion_model = client.completion_model(model);
 
-            // Build agent with Bash tool using AgentBuilder
+            // Build agent with tools using AgentBuilder
             // Note: max_tokens is required for Anthropic API
             let agent = AgentBuilder::new(completion_model)
                 .preamble(SYSTEM_PROMPT)
                 .tool(BashTool)
+                .tool(ReadTool)
+                .tool(WriteTool)
+                .tool(EditTool)
+                .tool(GlobTool)
+                .tool(GrepTool)
                 .default_max_turns(DEFAULT_MAX_TURNS)
                 .max_tokens(4096)
                 .build();
@@ -208,10 +216,15 @@ pub fn create_provider(
             // Create completion model using Responses API (default for openai::Client)
             let completion_model = client.completion_model(model);
 
-            // Build agent with Bash tool using AgentBuilder
+            // Build agent with tools using AgentBuilder
             let agent = AgentBuilder::new(completion_model)
                 .preamble(SYSTEM_PROMPT)
                 .tool(BashTool)
+                .tool(ReadTool)
+                .tool(WriteTool)
+                .tool(EditTool)
+                .tool(GlobTool)
+                .tool(GrepTool)
                 .default_max_turns(DEFAULT_MAX_TURNS)
                 .build();
 
