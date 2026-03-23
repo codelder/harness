@@ -4,7 +4,8 @@ use crate::planning::TodoManager;
 use reedline::{DefaultPrompt, DefaultPromptSegment, Reedline, Signal};
 use std::io::Write;
 use std::sync::atomic::Ordering;
-use std::sync::{Arc, Mutex};
+use std::sync::Arc;
+use tokio::sync::Mutex;
 use tracing::{debug, error, info, warn};
 
 /// Interactive REPL session
@@ -109,10 +110,8 @@ impl Session {
                             // Build the response with optional nag reminder
                             // Per Python reference: inject reminder into response for model visibility
                             let response = if self.rounds_since_todo >= 3 {
-                                let has_todos = self.todo_manager.lock()
-                                    .map(|m| !m.is_empty())
-                                    .unwrap_or(false);
-                                if has_todos {
+                                let has_todos = self.todo_manager.lock().await;
+                                if !has_todos.is_empty() {
                                     format!(
                                         "<reminder>You have pending todos. Use the 'todo' tool to update your task list.</reminder>\n\n{}",
                                         turn.response
@@ -220,10 +219,10 @@ mod tests {
         assert_eq!(session.rounds_since_todo, 0);
     }
 
-    #[test]
-    fn test_session_todo_manager_initializes_empty() {
+    #[tokio::test]
+    async fn test_session_todo_manager_initializes_empty() {
         let session = Session::new();
-        let manager = session.todo_manager.lock().unwrap();
+        let manager = session.todo_manager.lock().await;
         assert!(manager.is_empty());
     }
 

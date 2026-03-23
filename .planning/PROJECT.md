@@ -12,29 +12,28 @@ The harness provides the environment that enables an LLM (the agent) to perceive
 
 ## Current State
 
-**Shipped:** v0.2 Tool Use (2026-03-23)
+**Shipped:** v0.3 TodoWrite (2026-03-24)
 
-- 2,832 lines of Rust code
-- 87 tests passing
-- 6 production tools: Bash, Read, Write, Edit, Glob, Grep
+- 3,500+ lines of Rust code
+- 100+ tests passing
+- 7 production tools: Bash, Read, Write, Edit, Glob, Grep, TodoWrite
 - Multi-provider support: Anthropic, OpenAI (Ollama pending)
+- Nag reminder system for drift prevention
 
-## Current Milestone: v0.3 TodoWrite
+## Current Milestone: v0.4 Subagents
 
-**Goal:** Implement TodoWrite tool for multi-step task tracking with nag reminders
+**Goal:** Subagent spawning with isolated context
 
 **Target Features:**
-1. TodoManager state management (pending/in_progress/completed)
-2. todo tool registered to tool dispatch
-3. Nag reminder mechanism (inject reminder after 3+ rounds without todo call)
-4. "Only one in_progress" constraint
-5. Max 20 todos limit
+1. Spawn child agents with fresh message arrays
+2. Child agents execute without polluting parent context
+3. Parent receives summarized results when child completes
+4. Graceful error handling for child failures
 
 **Reference:**
-- [s03-todo-write.md](https://github.com/shareAI-lab/learn-claude-code/blob/main/docs/en/s03-todo-write.md)
-- [s03_todo_write.py](https://github.com/shareAI-lab/learn-claude-code/blob/main/agents/s03_todo_write.py)
+- [s04-subagents.md](https://github.com/shareAI-lab/learn-claude-code/blob/main/docs/en/s04-subagents.md)
 
-**Phase:** 3 (s03 - TodoWrite)
+**Phase:** 4 (s04 - Subagents)
 
 ## Requirements
 

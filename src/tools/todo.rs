@@ -2,7 +2,8 @@ use rig::tool::Tool;
 use rig::completion::ToolDefinition;
 use serde::Deserialize;
 use schemars::JsonSchema;
-use std::sync::{Arc, Mutex};
+use std::sync::Arc;
+use tokio::sync::Mutex;
 
 use crate::planning::{TodoManager, TodoItem, TodoStatus, TodoError};
 
@@ -94,9 +95,7 @@ Usage notes:
         }
 
         // Update the shared TodoManager
-        let mut manager = self.manager.lock().map_err(|_| {
-            TodoError::InvalidStatus("Failed to acquire lock".to_string())
-        })?;
+        let mut manager = self.manager.lock().await;
         manager.update(items)
     }
 }
@@ -212,7 +211,7 @@ mod tests {
         let manager = tool.get_manager();
 
         // Verify we can use the manager
-        let mgr = manager.lock().unwrap();
+        let mgr = manager.lock().await;
         assert!(mgr.is_empty());
     }
 }
