@@ -11,7 +11,7 @@ const MAX_OUTPUT_CHARS: usize = 50_000;
 pub struct GrepArgs {
     /// Regex pattern to search for
     pub pattern: String,
-    /// File or directory path to search (defaults to ".")
+    /// Single file path to search (defaults to ".", reads as file)
     pub path: Option<String>,
     /// Case-insensitive search (default: false)
     #[serde(default)]
@@ -43,11 +43,11 @@ impl Tool for GrepTool {
         ToolDefinition {
             name: "grep".to_string(),
             description: r#"
-Search for regex patterns in file contents.
+Search for regex patterns in a single file's contents.
 
 Usage notes:
 - Searches for the given regex pattern in the specified file
-- For Phase 2, supports single-file search (path should point to a file)
+- For Phase 2, only single-file search is supported
 - Use case_insensitive=true for case-insensitive matching
 - Returns matches in format: path:line_number:line_content
 - Output is truncated at 50K characters to prevent context explosion
@@ -175,7 +175,7 @@ mod tests {
         let definition = tool.definition("test".to_string()).await;
         assert_eq!(definition.name, "grep");
         assert!(definition.description.contains("regex"));
-        assert!(definition.description.contains("case-insensitive"));
+        assert!(definition.description.contains("single-file"));
     }
 
     #[tokio::test]

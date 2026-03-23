@@ -23,9 +23,6 @@ pub struct ReadArgs {
 pub enum ReadError {
     #[error("Failed to read file: {0}")]
     IoError(#[from] std::io::Error),
-
-    #[error("Invalid file path: {0}")]
-    InvalidPath(String),
 }
 
 /// Read tool for reading file contents
