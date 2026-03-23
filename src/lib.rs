@@ -3,6 +3,7 @@ pub mod llm;
 pub mod agent;
 pub mod cli;
 pub mod tools;
+pub mod planning;
 
 // Re-exports for convenience
 pub use error::{AgentError, ProviderError};
