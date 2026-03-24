@@ -1,7 +1,8 @@
 use super::{AgentTurn, Message, Role};
 use crate::error::{classify_prompt_error, AgentError};
-use rig::completion::CompletionModel;
-use rig::agent::{PromptHook, ToolCallHookAction};
+use rig::completion::{AssistantContent, CompletionModel};
+use rig::message::ReasoningContent;
+use rig::agent::{PromptHook, ToolCallHookAction, HookAction};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 use std::time::Duration;
@@ -50,24 +51,104 @@ impl<M> PromptHook<M> for TodoUsageHook
 where
     M: CompletionModel,
 {
-    /// Called when a tool is invoked during agent execution.
-    ///
-    /// This is the DIRECT tool usage detection mechanism (per Python approach).
-    /// When the todo tool is called, we set the flag to true.
+    /// Called before a tool is invoked - display tool call in real-time
     async fn on_tool_call(
         &self,
         tool_name: &str,
         _tool_call_id: Option<String>,
         _internal_call_id: &str,
-        _args: &str,
+        args: &str,
     ) -> ToolCallHookAction {
         // Direct detection: if todo tool is called, set the flag
-        // This is equivalent to Python's: used_todo = True
         if tool_name == "todo" {
             self.used_todo.store(true, Ordering::SeqCst);
         }
-        // Always continue with tool execution
+
+        // Display tool call info (truncate args if too long)
+        let args_preview = if args.len() > 100 {
+            format!("{}...", &args[..100])
+        } else {
+            args.to_string()
+        };
+        eprintln!("\n🔧 Tool: {}({})", tool_name, args_preview);
+
         ToolCallHookAction::cont()
+    }
+
+    /// Called after a tool is invoked - display tool result
+    async fn on_tool_result(
+        &self,
+        tool_name: &str,
+        _tool_call_id: Option<String>,
+        _internal_call_id: &str,
+        _args: &str,
+        result: &str,
+    ) -> HookAction {
+        // rig-core JSON-encodes tool outputs, so we need to decode
+        // e.g., "file1\nfile2" becomes "\"file1\\nfile2\""
+        let decoded_result = serde_json::from_str::<String>(result)
+            .unwrap_or_else(|_| result.to_string());
+
+        // Display result preview (truncate if too long)
+        let result_preview = if decoded_result.len() > 200 {
+            format!("{}...", &decoded_result[..200])
+        } else if decoded_result.is_empty() {
+            "(empty)".to_string()
+        } else {
+            decoded_result.clone()
+        };
+
+        if tool_name == "todo" {
+            // Special formatting for todo tool
+            eprintln!("📋 Todo:\n{}", decoded_result);
+        } else {
+            eprintln!("📤 Result: {}", result_preview);
+        }
+
+        HookAction::cont()
+    }
+
+    /// Called after receiving a completion response - display thinking content
+    async fn on_completion_response(
+        &self,
+        _prompt: &rig::message::Message,
+        response: &rig::completion::CompletionResponse<M::Response>,
+    ) -> HookAction {
+        // Extract and display reasoning/thinking content
+        for content in response.choice.iter() {
+            if let AssistantContent::Reasoning(reasoning) = content {
+                // Get the reasoning text
+                let thinking_text: String = reasoning
+                    .content
+                    .iter()
+                    .filter_map(|c| match c {
+                        ReasoningContent::Text { text, .. } => Some(text.clone()),
+                        _ => None,
+                    })
+                    .collect::<Vec<_>>()
+                    .join("\n");
+
+                if !thinking_text.is_empty() {
+                    // Use dim/bright black color (gray) for thinking content
+                    // ANSI codes: \x1B[90m = bright black (gray), \x1B[0m = reset
+                    eprintln!("\n\x1B[90m💭 Thinking:\n{}\x1B[0m\n", thinking_text);
+                }
+            }
+        }
+        HookAction::cont()
+    }
+
+    /// Called when receiving text delta (streaming) - optional real-time text display
+    async fn on_text_delta(
+        &self,
+        text_delta: &str,
+        _aggregated_text: &str,
+    ) -> HookAction {
+        // Print text as it streams in (optional - can be noisy)
+        // Uncomment the next line for real-time streaming output
+        // eprint!("{}", text_delta);
+        let _ = text_delta; // Suppress unused warning
+        HookAction::cont()
     }
 }
 
