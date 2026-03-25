@@ -114,7 +114,7 @@ impl LlmProvider {
     /// # Arguments
     /// * `prompt` - The prompt message to send
     /// * `chat_history` - Previous conversation history as rig Messages
-    /// * `hook` - Hook for observing tool calls (e.g., TodoUsageHook)
+    /// * `hook` - Hook for observing tool calls and forwarding structured events
     ///
     /// # Returns
     /// The LLM's response as a string

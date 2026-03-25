@@ -1,5 +1,6 @@
 use super::{AgentTurn, Message, Role};
 use crate::error::{classify_prompt_error, AgentError};
+use crate::frontend::{FrontendEvent, FrontendEventSender};
 use rig::completion::{AssistantContent, CompletionModel};
 use rig::message::ReasoningContent;
 use rig::agent::{PromptHook, ToolCallHookAction, HookAction};
@@ -25,6 +26,8 @@ const INITIAL_DELAY: Duration = Duration::from_secs(1);
 pub struct TodoUsageHook {
     /// Flag set to true when todo tool is called
     used_todo: Arc<AtomicBool>,
+    /// Optional side channel for structured runtime/frontend events.
+    event_tx: Option<FrontendEventSender>,
 }
 
 impl TodoUsageHook {
@@ -32,18 +35,100 @@ impl TodoUsageHook {
     ///
     /// Returns the hook and a clone of the flag that can be checked
     /// after agent execution completes.
-    pub fn new() -> (Self, Arc<AtomicBool>) {
+    pub fn new(event_tx: Option<FrontendEventSender>) -> (Self, Arc<AtomicBool>) {
         let used_todo = Arc::new(AtomicBool::new(false));
         let hook = Self {
             used_todo: used_todo.clone(),
+            event_tx,
         };
         (hook, used_todo)
+    }
+
+    async fn record_tool_call(&self, tool_name: &str, args: &str) {
+        if tool_name == "todo" {
+            self.used_todo.store(true, Ordering::SeqCst);
+        }
+
+        let args_preview = if args.len() > 100 {
+            format!("{}...", &args[..100])
+        } else {
+            args.to_string()
+        };
+
+        self.emit_event(FrontendEvent::ToolCallStarted {
+            name: tool_name.to_string(),
+            args_preview,
+        })
+        .await;
+    }
+
+    async fn record_tool_result(&self, tool_name: &str, result: &str) {
+        let decoded_result =
+            serde_json::from_str::<String>(result).unwrap_or_else(|_| result.to_string());
+
+        let result_preview = if decoded_result.len() > 200 {
+            format!("{}...", &decoded_result[..200])
+        } else if decoded_result.is_empty() {
+            "(empty)".to_string()
+        } else {
+            decoded_result
+        };
+
+        self.emit_event(FrontendEvent::ToolCallFinished {
+            name: tool_name.to_string(),
+            result_preview,
+        })
+        .await;
+    }
+
+    async fn record_thinking(&self, thinking_text: String) {
+        if thinking_text.is_empty() {
+            return;
+        }
+
+        self.emit_event(FrontendEvent::Thinking {
+            text: thinking_text,
+        })
+        .await;
+    }
+
+    async fn record_text_delta(&self, text_delta: &str) {
+        if text_delta.is_empty() {
+            return;
+        }
+
+        self.emit_event(FrontendEvent::AssistantMessageDelta {
+            delta: text_delta.to_string(),
+        })
+        .await;
+    }
+
+    pub async fn emit_retry_scheduled(
+        &self,
+        attempt: u32,
+        max_retries: u32,
+        delay: Duration,
+        reason: String,
+    ) {
+        self.emit_event(FrontendEvent::RetryScheduled {
+            attempt,
+            max_retries,
+            delay_ms: delay.as_millis() as u64,
+            reason,
+        })
+        .await;
+    }
+
+    async fn emit_event(&self, event: FrontendEvent) {
+        if let Some(event_tx) = &self.event_tx {
+            let _ = event_tx.emit(event).await;
+        }
     }
 }
 
 impl Default for TodoUsageHook {
     fn default() -> Self {
-        Self::new().0
+        Self::new(None).0
     }
 }
 
@@ -59,19 +144,7 @@ where
         _internal_call_id: &str,
         args: &str,
     ) -> ToolCallHookAction {
-        // Direct detection: if todo tool is called, set the flag
-        if tool_name == "todo" {
-            self.used_todo.store(true, Ordering::SeqCst);
-        }
-
-        // Display tool call info (truncate args if too long)
-        let args_preview = if args.len() > 100 {
-            format!("{}...", &args[..100])
-        } else {
-            args.to_string()
-        };
-        eprintln!("\n🔧 Tool: {}({})", tool_name, args_preview);
-
+        self.record_tool_call(tool_name, args).await;
         ToolCallHookAction::cont()
     }
 
@@ -84,27 +157,7 @@ where
         _args: &str,
         result: &str,
     ) -> HookAction {
-        // rig-core JSON-encodes tool outputs, so we need to decode
-        // e.g., "file1\nfile2" becomes "\"file1\\nfile2\""
-        let decoded_result = serde_json::from_str::<String>(result)
-            .unwrap_or_else(|_| result.to_string());
-
-        // Display result preview (truncate if too long)
-        let result_preview = if decoded_result.len() > 200 {
-            format!("{}...", &decoded_result[..200])
-        } else if decoded_result.is_empty() {
-            "(empty)".to_string()
-        } else {
-            decoded_result.clone()
-        };
-
-        if tool_name == "todo" {
-            // Special formatting for todo tool
-            eprintln!("📋 Todo:\n{}", decoded_result);
-        } else {
-            eprintln!("📤 Result: {}", result_preview);
-        }
-
+        self.record_tool_result(tool_name, result).await;
         HookAction::cont()
     }
 
@@ -128,11 +181,7 @@ where
                     .collect::<Vec<_>>()
                     .join("\n");
 
-                if !thinking_text.is_empty() {
-                    // Use dim/bright black color (gray) for thinking content
-                    // ANSI codes: \x1B[90m = bright black (gray), \x1B[0m = reset
-                    eprintln!("\n\x1B[90m💭 Thinking:\n{}\x1B[0m\n", thinking_text);
-                }
+                self.record_thinking(thinking_text).await;
             }
         }
         HookAction::cont()
@@ -144,10 +193,7 @@ where
         text_delta: &str,
         _aggregated_text: &str,
     ) -> HookAction {
-        // Print text as it streams in (optional - can be noisy)
-        // Uncomment the next line for real-time streaming output
-        // eprint!("{}", text_delta);
-        let _ = text_delta; // Suppress unused warning
+        self.record_text_delta(text_delta).await;
         HookAction::cont()
     }
 }
@@ -163,13 +209,16 @@ where
 ///
 /// # Returns
 /// The result of the operation if successful, or the final error if all retries exhausted
-pub async fn with_retry<T, F, Fut>(
+pub async fn with_retry<T, F, Fut, N, NFut>(
     max_retries: u32,
     mut operation: F,
+    mut on_retry: N,
 ) -> Result<T, AgentError>
 where
     F: FnMut() -> Fut,
     Fut: std::future::Future<Output = Result<T, AgentError>>,
+    N: FnMut(u32, u32, Duration, &AgentError) -> NFut,
+    NFut: std::future::Future<Output = ()>,
 {
     let mut backoff_delay = INITIAL_DELAY;
 
@@ -183,7 +232,7 @@ where
                     _ => backoff_delay,
                 };
 
-                eprintln!("Retry {}/{}: {} (waiting {:?})", attempt + 1, max_retries, e, retry_delay);
+                on_retry(attempt + 1, max_retries, retry_delay, &e).await;
                 sleep(retry_delay).await;
 
                 // Only increase backoff for non-rate-limit errors
@@ -244,15 +293,31 @@ pub async fn agent_loop(
             .collect();
 
         // Call LLM with retry logic using hook-enabled chat
-        let response = with_retry(MAX_RETRIES, || {
-            let hook_clone = hook.clone();
-            async {
-                provider
-                    .chat_with_history_and_hook(current_input.to_string(), rig_messages.clone(), hook_clone)
-                    .await
-                    .map_err(classify_prompt_error)
-            }
-        })
+        let retry_hook = hook.clone();
+        let response = with_retry(
+            MAX_RETRIES,
+            || {
+                let hook_clone = hook.clone();
+                async {
+                    provider
+                        .chat_with_history_and_hook(
+                            current_input.to_string(),
+                            rig_messages.clone(),
+                            hook_clone,
+                        )
+                        .await
+                        .map_err(classify_prompt_error)
+                }
+            },
+            move |attempt, max_retries, retry_delay, error| {
+                let hook = retry_hook.clone();
+                let reason = error.to_string();
+                async move {
+                    hook.emit_retry_scheduled(attempt, max_retries, retry_delay, reason)
+                        .await;
+                }
+            },
+        )
         .await?;
 
         // Return the structured turn result
@@ -266,6 +331,7 @@ pub async fn agent_loop(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::frontend::{frontend_event_channel, FrontendEvent};
     use std::sync::atomic::{AtomicU32, Ordering};
     use std::sync::Arc;
 
@@ -274,13 +340,17 @@ mod tests {
         let counter = Arc::new(AtomicU32::new(0));
         let counter_clone = counter.clone();
 
-        let result = with_retry(3, move || {
-            let counter = counter_clone.clone();
-            async move {
-                counter.fetch_add(1, Ordering::SeqCst);
-                Ok::<_, AgentError>(42)
-            }
-        })
+        let result = with_retry(
+            3,
+            move || {
+                let counter = counter_clone.clone();
+                async move {
+                    counter.fetch_add(1, Ordering::SeqCst);
+                    Ok::<_, AgentError>(42)
+                }
+            },
+            |_attempt, _max_retries, _retry_delay, _error| async {},
+        )
         .await;
 
         assert_eq!(result.unwrap(), 42);
@@ -292,17 +362,21 @@ mod tests {
         let counter = Arc::new(AtomicU32::new(0));
         let counter_clone = counter.clone();
 
-        let result = with_retry(3, move || {
-            let counter = counter_clone.clone();
-            async move {
-                let attempt = counter.fetch_add(1, Ordering::SeqCst);
-                if attempt < 2 {
-                    Err(AgentError::Network("timeout".to_string()))
-                } else {
-                    Ok::<_, AgentError>(42)
+        let result = with_retry(
+            3,
+            move || {
+                let counter = counter_clone.clone();
+                async move {
+                    let attempt = counter.fetch_add(1, Ordering::SeqCst);
+                    if attempt < 2 {
+                        Err(AgentError::Network("timeout".to_string()))
+                    } else {
+                        Ok::<_, AgentError>(42)
+                    }
                 }
-            }
-        })
+            },
+            |_attempt, _max_retries, _retry_delay, _error| async {},
+        )
         .await;
 
         assert_eq!(result.unwrap(), 42);
@@ -314,13 +388,17 @@ mod tests {
         let counter = Arc::new(AtomicU32::new(0));
         let counter_clone = counter.clone();
 
-        let result: Result<i32, AgentError> = with_retry(3, move || {
-            let counter = counter_clone.clone();
-            async move {
-                counter.fetch_add(1, Ordering::SeqCst);
-                Err(AgentError::Auth("invalid key".to_string()))
-            }
-        })
+        let result: Result<i32, AgentError> = with_retry(
+            3,
+            move || {
+                let counter = counter_clone.clone();
+                async move {
+                    counter.fetch_add(1, Ordering::SeqCst);
+                    Err(AgentError::Auth("invalid key".to_string()))
+                }
+            },
+            |_attempt, _max_retries, _retry_delay, _error| async {},
+        )
         .await;
 
         assert!(result.is_err());
@@ -333,13 +411,17 @@ mod tests {
         let counter = Arc::new(AtomicU32::new(0));
         let counter_clone = counter.clone();
 
-        let result: Result<i32, AgentError> = with_retry(2, move || {
-            let counter = counter_clone.clone();
-            async move {
-                counter.fetch_add(1, Ordering::SeqCst);
-                Err(AgentError::Network("timeout".to_string()))
-            }
-        })
+        let result: Result<i32, AgentError> = with_retry(
+            2,
+            move || {
+                let counter = counter_clone.clone();
+                async move {
+                    counter.fetch_add(1, Ordering::SeqCst);
+                    Err(AgentError::Network("timeout".to_string()))
+                }
+            },
+            |_attempt, _max_retries, _retry_delay, _error| async {},
+        )
         .await;
 
         assert!(result.is_err());
@@ -352,23 +434,67 @@ mod tests {
         let counter_clone = counter.clone();
         let start = std::time::Instant::now();
 
-        let result: Result<i32, AgentError> = with_retry(1, move || {
-            let counter = counter_clone.clone();
-            async move {
-                let attempt = counter.fetch_add(1, Ordering::SeqCst);
-                if attempt == 0 {
-                    // Simulate rate limit with 100ms retry-after
-                    Err(AgentError::RateLimited(Duration::from_millis(100)))
-                } else {
-                    Ok(42)
+        let result: Result<i32, AgentError> = with_retry(
+            1,
+            move || {
+                let counter = counter_clone.clone();
+                async move {
+                    let attempt = counter.fetch_add(1, Ordering::SeqCst);
+                    if attempt == 0 {
+                        Err(AgentError::RateLimited(Duration::from_millis(100)))
+                    } else {
+                        Ok(42)
+                    }
                 }
-            }
-        })
+            },
+            |_attempt, _max_retries, _retry_delay, _error| async {},
+        )
         .await;
 
         let elapsed = start.elapsed();
         assert_eq!(result.unwrap(), 42);
         // Should have waited at least 100ms (the retry-after duration)
         assert!(elapsed >= Duration::from_millis(100), "Expected at least 100ms wait, got {:?}", elapsed);
+    }
+
+    #[tokio::test]
+    async fn test_hook_emits_tool_and_retry_events() {
+        let (event_tx, mut event_rx) = frontend_event_channel(8);
+        let (hook, used_todo) = TodoUsageHook::new(Some(event_tx));
+
+        hook.record_tool_call("todo", "{\"items\":[]}").await;
+        hook.record_tool_result("todo", "\"updated\"").await;
+        hook.emit_retry_scheduled(
+            1,
+            3,
+            Duration::from_millis(250),
+            "temporary network issue".to_string(),
+        )
+        .await;
+
+        assert!(used_todo.load(Ordering::SeqCst));
+        assert_eq!(
+            event_rx.recv().await,
+            Some(FrontendEvent::ToolCallStarted {
+                name: "todo".to_string(),
+                args_preview: "{\"items\":[]}".to_string(),
+            })
+        );
+        assert_eq!(
+            event_rx.recv().await,
+            Some(FrontendEvent::ToolCallFinished {
+                name: "todo".to_string(),
+                result_preview: "updated".to_string(),
+            })
+        );
+        assert_eq!(
+            event_rx.recv().await,
+            Some(FrontendEvent::RetryScheduled {
+                attempt: 1,
+                max_retries: 3,
+                delay_ms: 250,
+                reason: "temporary network issue".to_string(),
+            })
+        );
     }
 }

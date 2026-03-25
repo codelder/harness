@@ -196,7 +196,15 @@ impl SessionRuntime {
         F: for<'a> FnOnce(&'a [Message], &'a str, &'a LlmProvider, TodoUsageHook) -> TurnFuture<'a>,
     {
         let provider = self.provider.as_ref().ok_or_else(not_started_error)?;
-        let (hook, used_todo_flag) = TodoUsageHook::new();
+        self.emit_event(
+            event_tx,
+            FrontendEvent::UserMessageCommitted {
+                text: current_input.clone(),
+            },
+        )
+        .await?;
+
+        let (hook, used_todo_flag) = TodoUsageHook::new(Some(event_tx.clone()));
         let turn = executor(&self.messages, &current_input, provider, hook).await?;
         let todo_used = used_todo_flag.load(Ordering::SeqCst);
 
@@ -210,14 +218,6 @@ impl SessionRuntime {
         } else {
             turn.response.clone()
         };
-
-        self.emit_event(
-            event_tx,
-            FrontendEvent::UserMessageCommitted {
-                text: turn.user_input.clone(),
-            },
-        )
-        .await?;
 
         self.emit_event(
             event_tx,
