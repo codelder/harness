@@ -22,15 +22,18 @@ fn test_message_cloning() {
 
 #[tokio::test]
 async fn test_with_retry_immediate_success() {
-    let result = with_retry(3, || async { Ok::<_, AgentError>(42) }).await;
+    let result = with_retry(3, || async { Ok::<_, AgentError>(42) }, |_a, _m, _d, _e| async {})
+        .await;
     assert_eq!(result.unwrap(), 42);
 }
 
 #[tokio::test]
 async fn test_with_retry_non_retryable_error() {
-    let result: Result<i32, AgentError> = with_retry(3, || async {
-        Err(AgentError::Auth("invalid".to_string()))
-    })
+    let result: Result<i32, AgentError> = with_retry(
+        3,
+        || async { Err(AgentError::Auth("invalid".to_string())) },
+        |_a, _m, _d, _e| async {},
+    )
     .await;
 
     assert!(result.is_err());

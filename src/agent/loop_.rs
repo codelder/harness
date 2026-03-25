@@ -276,56 +276,49 @@ pub async fn agent_loop(
     provider: &crate::llm::LlmProvider,
     hook: TodoUsageHook,
 ) -> Result<AgentTurn, AgentError> {
-    loop {
-        // Convert history to rig's Message type for chat history
-        // Note: chat_history should NOT include the current input,
-        // because it will be passed separately as the prompt parameter
-        let rig_messages: Vec<rig::completion::Message> = history
-            .iter()
-            .filter_map(|m| match m.role {
-                Role::User => Some(rig::completion::Message::user(&m.content)),
-                Role::Assistant => Some(rig::completion::Message::assistant(&m.content)),
-                Role::System => {
-                    // System messages are handled via agent preamble in rig
-                    None
-                }
-            })
-            .collect();
+    // Convert history to rig's Message type for chat history.
+    // Note: chat_history should NOT include the current input because it is
+    // passed separately as the prompt parameter.
+    let rig_messages: Vec<rig::completion::Message> = history
+        .iter()
+        .filter_map(|m| match m.role {
+            Role::User => Some(rig::completion::Message::user(&m.content)),
+            Role::Assistant => Some(rig::completion::Message::assistant(&m.content)),
+            Role::System => None,
+        })
+        .collect();
 
-        // Call LLM with retry logic using hook-enabled chat
-        let retry_hook = hook.clone();
-        let response = with_retry(
-            MAX_RETRIES,
-            || {
-                let hook_clone = hook.clone();
-                async {
-                    provider
-                        .chat_with_history_and_hook(
-                            current_input.to_string(),
-                            rig_messages.clone(),
-                            hook_clone,
-                        )
-                        .await
-                        .map_err(classify_prompt_error)
-                }
-            },
-            move |attempt, max_retries, retry_delay, error| {
-                let hook = retry_hook.clone();
-                let reason = error.to_string();
-                async move {
-                    hook.emit_retry_scheduled(attempt, max_retries, retry_delay, reason)
-                        .await;
-                }
-            },
-        )
-        .await?;
+    let retry_hook = hook.clone();
+    let response = with_retry(
+        MAX_RETRIES,
+        || {
+            let hook_clone = hook.clone();
+            async {
+                provider
+                    .chat_with_history_and_hook(
+                        current_input.to_string(),
+                        rig_messages.clone(),
+                        hook_clone,
+                    )
+                    .await
+                    .map_err(classify_prompt_error)
+            }
+        },
+        move |attempt, max_retries, retry_delay, error| {
+            let hook = retry_hook.clone();
+            let reason = error.to_string();
+            async move {
+                hook.emit_retry_scheduled(attempt, max_retries, retry_delay, reason)
+                    .await;
+            }
+        },
+    )
+    .await?;
 
-        // Return the structured turn result
-        return Ok(AgentTurn {
-            user_input: current_input.to_string(),
-            response,
-        });
-    }
+    Ok(AgentTurn {
+        user_input: current_input.to_string(),
+        response,
+    })
 }
 
 #[cfg(test)]

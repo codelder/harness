@@ -116,15 +116,13 @@ fn classify_completion_error(err: CompletionError) -> AgentError {
         CompletionError::HttpError(http_err) => classify_http_error(http_err),
         CompletionError::ProviderError(msg) => {
             // Provider errors might contain useful info in the message
-            classify_provider_message(&msg).unwrap_or_else(|| {
-                AgentError::Provider(ProviderError::RequestFailed(msg))
-            })
+            classify_provider_message(&msg)
+                .unwrap_or(AgentError::Provider(ProviderError::RequestFailed(msg)))
         }
         CompletionError::ResponseError(msg) => {
             // Response errors from API (e.g., Anthropic error response)
-            classify_response_message(&msg).unwrap_or_else(|| {
-                AgentError::Provider(ProviderError::RequestFailed(msg))
-            })
+            classify_response_message(&msg)
+                .unwrap_or(AgentError::Provider(ProviderError::RequestFailed(msg)))
         }
         CompletionError::RequestError(e) => {
             AgentError::Provider(ProviderError::RequestFailed(e.to_string()))
@@ -146,12 +144,7 @@ fn classify_http_error(err: HttpError) -> AgentError {
         }
         HttpError::Instance(e) => {
             // Underlying reqwest error (timeout, connection failed, etc.)
-            let err_str = e.to_string();
-            if is_timeout_error(&err_str) {
-                AgentError::Network(err_str)
-            } else {
-                AgentError::Network(err_str)
-            }
+            AgentError::Network(e.to_string())
         }
         HttpError::Protocol(e) => {
             AgentError::Network(format!("HTTP protocol error: {}", e))
@@ -274,6 +267,7 @@ fn classify_context_limit(body: &str) -> Option<AgentError> {
 }
 
 /// Check if an error string indicates a timeout
+#[cfg(test)]
 fn is_timeout_error(err_str: &str) -> bool {
     let lower = err_str.to_lowercase();
     lower.contains("timeout") || lower.contains("timed out")
