@@ -1,38 +1,33 @@
-use crate::agent::{agent_loop, Message, TodoUsageHook};
 use crate::error::AgentError;
-use crate::planning::TodoManager;
+use crate::frontend::{
+    frontend_event_channel,
+    FrontendCommand,
+    FrontendEvent,
+    FrontendEventReceiver,
+};
+use crate::session::{SessionRuntime, SessionRuntimeConfig, SessionRuntimeOutcome};
 use reedline::{DefaultPrompt, DefaultPromptSegment, Reedline, Signal};
 use std::io::Write;
-use std::sync::atomic::Ordering;
 use std::sync::Arc;
 use tokio::sync::Mutex;
 use tracing::{debug, error, info, warn};
 
 /// Interactive REPL session
 pub struct Session {
-    messages: Vec<Message>,
-    turn_count: u32,
-    todo_manager: Arc<Mutex<TodoManager>>,
-    rounds_since_todo: u32,
+    runtime: SessionRuntime,
 }
 
 impl Session {
     /// Create a new session with minimal system prompt
     pub fn new() -> Self {
         Self {
-            messages: vec![Message::system(
-                "You are an AI agent with the ability to have a conversation. \
-                 Respond naturally to user messages.",
-            )],
-            turn_count: 0,
-            todo_manager: Arc::new(Mutex::new(TodoManager::new())),
-            rounds_since_todo: 0,
+            runtime: SessionRuntime::new(),
         }
     }
 
     /// Get a clone of the shared TodoManager for tool creation
-    pub fn todo_manager(&self) -> Arc<Mutex<TodoManager>> {
-        self.todo_manager.clone()
+    pub fn todo_manager(&self) -> Arc<Mutex<crate::planning::TodoManager>> {
+        self.runtime.todo_manager()
     }
 
     /// Run the interactive REPL session
@@ -44,14 +39,19 @@ impl Session {
         thinking: bool,
         thinking_budget: u64,
     ) -> Result<(), AgentError> {
-        let provider = crate::llm::create_provider(
-            provider_type,
-            model,
-            base_url,
-            thinking,
-            thinking_budget,
-            self.todo_manager.clone(),
-        )?;
+        let (event_tx, mut event_rx) = frontend_event_channel(64);
+        self.runtime
+            .start(
+                SessionRuntimeConfig {
+                    provider_type,
+                    model: model.to_string(),
+                    base_url: base_url.map(str::to_string),
+                    thinking,
+                    thinking_budget,
+                },
+                &event_tx,
+            )
+            .await?;
         info!(provider = ?provider_type, model = model, thinking = thinking, "Session initialized");
 
         println!("Agent Harness v0.1.0");
@@ -60,6 +60,7 @@ impl Session {
             println!("Extended thinking: enabled (budget: {} tokens)", thinking_budget);
         }
         println!("Type your message and press Enter. Ctrl+C or Ctrl+D to exit.\n");
+        Self::drain_events(&mut event_rx);
 
         let prompt = DefaultPrompt::new(
             DefaultPromptSegment::Basic("You".to_string()),
@@ -69,10 +70,7 @@ impl Session {
         loop {
             debug!("Waiting for user input");
             let prompt = prompt.clone();
-            let result = tokio::task::spawn_blocking(move || {
-                Reedline::create().read_line(&prompt)
-            })
-            .await;
+            let result = tokio::task::spawn_blocking(move || Reedline::create().read_line(&prompt)).await;
 
             match result {
                 Ok(Ok(Signal::Success(line))) => {
@@ -81,10 +79,10 @@ impl Session {
                         continue;
                     }
 
-                    // Check for exit commands
                     if line == "exit" || line == "quit" {
                         info!("User requested exit via command");
-                        self.print_summary();
+                        let _ = self.runtime.handle_command(FrontendCommand::Exit, &event_tx).await?;
+                        Self::drain_events(&mut event_rx);
                         return Ok(());
                     }
 
@@ -95,65 +93,34 @@ impl Session {
                         warn!("Failed to flush stdout: {}", e);
                     }
 
-                    // Create hook for this turn (flag starts false)
-                    let (hook, used_todo_flag) = TodoUsageHook::new();
-
-                    match agent_loop(&self.messages, line, &provider, hook).await {
-                        Ok(turn) => {
-                            debug!(response_len = turn.response.len(), "Agent response received");
-
-                            // Check if todo was used (directly from dispatch via hook)
-                            // Reset counter when todo is used; increment happens after response
-                            if used_todo_flag.load(Ordering::SeqCst) {
-                                self.rounds_since_todo = 0;
-                                used_todo_flag.store(false, Ordering::SeqCst); // Reset for next turn
-                            }
-
-                            // Build the response with optional nag reminder
-                            // Per Python reference: inject reminder into response for model visibility
-                            let response = if self.rounds_since_todo >= 3 {
-                                let manager = self.todo_manager.lock().await;
-                                if !manager.is_empty() {
-                                    format!(
-                                        "<reminder>You have pending todos. Use the 'todo' tool to update your task list.</reminder>\n\n{}",
-                                        turn.response
-                                    )
-                                } else {
-                                    turn.response.clone()
-                                }
-                            } else {
-                                turn.response.clone()
-                            };
-
-                            println!("{}", response);
-
-                            // Increment round counter after each agent response
-                            self.rounds_since_todo += 1;
-
-                            // Commit the turn to history only on success
-                            // Store the original response (without reminder) in history
-                            self.messages.push(Message::user(&turn.user_input));
-                            self.messages.push(Message::assistant(&turn.response));
-                            self.turn_count += 1;
-                        }
-                        Err(AgentError::ToolsNotImplemented) => {
-                            warn!("Tool use requested but not implemented");
-                            eprintln!("\nError: Tool use requested but not implemented (Phase 2 feature)");
+                    match self
+                        .runtime
+                        .handle_command(FrontendCommand::SubmitMessage(line.to_string()), &event_tx)
+                        .await
+                    {
+                        Ok(SessionRuntimeOutcome::Continue | SessionRuntimeOutcome::Interrupted) => {}
+                        Ok(SessionRuntimeOutcome::Exit(_)) => {
+                            Self::drain_events(&mut event_rx);
+                            return Ok(());
                         }
                         Err(e) => {
-                            error!(error = %e, "Agent loop error");
+                            error!(error = %e, "Runtime command error");
                             eprintln!("\nError: {}", e);
                         }
                     }
+
+                    Self::drain_events(&mut event_rx);
                 }
                 Ok(Ok(Signal::CtrlC)) => {
                     info!("User pressed Ctrl+C, exiting");
-                    self.print_summary();
+                    let _ = self.runtime.handle_command(FrontendCommand::Exit, &event_tx).await?;
+                    Self::drain_events(&mut event_rx);
                     return Ok(());
                 }
                 Ok(Ok(Signal::CtrlD)) => {
                     info!("User pressed Ctrl+D, exiting");
-                    self.print_summary();
+                    let _ = self.runtime.handle_command(FrontendCommand::Exit, &event_tx).await?;
+                    Self::drain_events(&mut event_rx);
                     return Ok(());
                 }
                 Ok(Err(err)) => {
@@ -169,7 +136,8 @@ impl Session {
                 Err(err) => {
                     error!(error = %err, "spawn_blocking join error");
                     eprintln!("Error: {}", err);
-                    self.print_summary();
+                    let _ = self.runtime.handle_command(FrontendCommand::Exit, &event_tx).await?;
+                    Self::drain_events(&mut event_rx);
                     return Err(AgentError::Provider(crate::error::ProviderError::RequestFailed(
                         err.to_string(),
                     )));
@@ -178,11 +146,31 @@ impl Session {
         }
     }
 
-    /// Print session summary on exit
-    fn print_summary(&self) {
-        println!("\nSession Summary:");
-        println!("  Turns: {}", self.turn_count);
-        println!("  Messages: {}", self.messages.len());
+    fn drain_events(event_rx: &mut FrontendEventReceiver) {
+        while let Ok(event) = event_rx.try_recv() {
+            Self::render_event(event);
+        }
+    }
+
+    fn render_event(event: FrontendEvent) {
+        match event {
+            FrontendEvent::AssistantMessageCompleted { text } => println!("{}", text),
+            FrontendEvent::Error { message } => eprintln!("\nError: {}", message),
+            FrontendEvent::SessionEnded { summary } => {
+                println!("\nSession Summary:");
+                println!("  Turns: {}", summary.turns);
+                println!("  Messages: {}", summary.message_count);
+            }
+            FrontendEvent::Status { message } => eprintln!("\n{}", message),
+            FrontendEvent::Reminder { .. }
+            | FrontendEvent::SessionStarted { .. }
+            | FrontendEvent::UserMessageCommitted { .. }
+            | FrontendEvent::AssistantMessageDelta { .. }
+            | FrontendEvent::Thinking { .. }
+            | FrontendEvent::ToolCallStarted { .. }
+            | FrontendEvent::ToolCallFinished { .. }
+            | FrontendEvent::RetryScheduled { .. } => {}
+        }
     }
 }
 
@@ -199,32 +187,33 @@ mod tests {
     #[test]
     fn test_session_initialization() {
         let session = Session::new();
-        assert_eq!(session.messages.len(), 1);
-        assert_eq!(session.turn_count, 0);
+        assert_eq!(session.runtime.message_count(), 1);
+        assert_eq!(session.runtime.turn_count(), 0);
     }
 
     #[test]
     fn test_session_default() {
         let session = Session::default();
-        assert_eq!(session.messages.len(), 1);
+        assert_eq!(session.runtime.message_count(), 1);
     }
 
     #[test]
     fn test_system_message_content() {
         let session = Session::new();
-        assert!(session.messages[0].content.contains("AI agent"));
+        assert!(session.runtime.messages()[0].content.contains("AI agent"));
     }
 
     #[test]
     fn test_session_rounds_since_todo_initializes_to_zero() {
         let session = Session::new();
-        assert_eq!(session.rounds_since_todo, 0);
+        assert_eq!(session.runtime.rounds_since_todo(), 0);
     }
 
     #[tokio::test]
     async fn test_session_todo_manager_initializes_empty() {
         let session = Session::new();
-        let manager = session.todo_manager.lock().await;
+        let todo_manager = session.todo_manager();
+        let manager = todo_manager.lock().await;
         assert!(manager.is_empty());
     }
 
@@ -234,7 +223,6 @@ mod tests {
         let manager1 = session.todo_manager();
         let manager2 = session.todo_manager();
 
-        // Both should point to the same underlying manager
         assert!(Arc::ptr_eq(&manager1, &manager2));
     }
 }

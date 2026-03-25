@@ -3,6 +3,7 @@ pub mod llm;
 pub mod agent;
 pub mod cli;
 pub mod frontend;
+pub mod session;
 pub mod tools;
 pub mod planning;
 
@@ -21,4 +22,5 @@ pub use frontend::{
     FrontendSessionSummary,
     send_frontend_command,
 };
+pub use session::{SessionRuntime, SessionRuntimeConfig, SessionRuntimeOutcome, SessionSummary};
 pub use tools::BashTool;
