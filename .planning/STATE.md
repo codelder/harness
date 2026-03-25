@@ -2,14 +2,14 @@
 gsd_state_version: 1.0
 milestone: v0.4
 milestone_name: Subagents
-status: Executing Phase 03.2
-last_updated: "2026-03-25T01:34:37.020Z"
+status: Ready for verification
+last_updated: "2026-03-25T01:41:11.679Z"
 last_activity: 2026-03-25
 progress:
   total_phases: 2
-  completed_phases: 0
+  completed_phases: 1
   total_plans: 4
-  completed_plans: 3
+  completed_plans: 4
 ---
 
 # Project State
@@ -31,8 +31,8 @@ See: .planning/PROJECT.md (updated 2026-03-24)
 
 ## Current Position
 
-Phase: 03.2 (terminal-ui-and-frontend-interface-abstraction) — EXECUTING
-Plan: 4 of 4
+Phase: 03.2 (terminal-ui-and-frontend-interface-abstraction) — READY FOR VERIFICATION
+Plans: 4 of 4 completed
 
 ## Accumulated Context
 
@@ -50,6 +50,8 @@ Decisions are logged in PROJECT.md Key Decisions table.
 - [Phase 03.2]: Move retry reporting into a notifier callback passed to with_retry. — The retry helper now stays terminal-agnostic while still surfacing retry metadata to any frontend that listens to FrontendEventSender.
 - [Phase 03.2]: Use a reducer-style CliApp over FrontendEvent and FrontendCommand instead of embedding UI state inside SessionRuntime. — This keeps rendering and keyboard behavior testable without a live terminal while preserving the shared runtime boundary for future non-terminal adapters.
 - [Phase 03.2]: Centralize raw-mode and alternate-screen ownership in TerminalGuard with a dedicated crossterm input listener task. — This keeps terminal lifecycle restoration explicit and limits terminal side effects to one module instead of scattering them across main/session code.
+- [Phase 03.2]: Favor protocol and lifecycle integration tests over brittle TUI snapshot assertions. — The frontend contract is the stable architectural boundary; testing it directly gives better regression coverage while allowing the visual layout to evolve.
+- [Phase 03.2]: Use a non-interactive harness --help smoke path for startup verification. — This verifies the binary still boots through the migrated CLI stack without requiring a live model call or interactive terminal session in CI.
 
 ### Pending Todos
 
