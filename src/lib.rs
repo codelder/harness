@@ -19,5 +19,6 @@ pub use frontend::{
     FrontendEventReceiver,
     FrontendEventSender,
     FrontendSessionSummary,
+    send_frontend_command,
 };
 pub use tools::BashTool;

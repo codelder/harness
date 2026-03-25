@@ -1,4 +1,5 @@
-use tokio::sync::mpsc;
+use std::sync::Arc;
+use tokio::sync::{mpsc, Mutex};
 
 /// Default bounded channel capacity between the runtime and any frontend adapter.
 pub const DEFAULT_FRONTEND_CHANNEL_CAPACITY: usize = 64;
@@ -34,8 +35,11 @@ pub enum DeliveryMode {
 
 /// Runtime-to-frontend protocol.
 ///
-/// Must-deliver events are delivered with `send().await`.
-/// Best-effort events currently share the same path and will be refined in GREEN.
+/// Delivery policy:
+/// - must-deliver events use `send().await`
+/// - best-effort events use `try_send`
+/// - when a best-effort event hits a full bounded queue, the sender coalesces it
+///   into the latest reducer-visible value so adapters can flush it later
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum FrontendEvent {
     SessionStarted { provider: String, model: String },
@@ -59,7 +63,20 @@ pub enum FrontendEvent {
 
 impl FrontendEvent {
     pub fn delivery_mode(&self) -> DeliveryMode {
-        DeliveryMode::MustDeliver
+        match self {
+            FrontendEvent::AssistantMessageDelta { .. }
+            | FrontendEvent::Thinking { .. }
+            | FrontendEvent::Status { .. } => DeliveryMode::BestEffort,
+            FrontendEvent::SessionStarted { .. }
+            | FrontendEvent::UserMessageCommitted { .. }
+            | FrontendEvent::AssistantMessageCompleted { .. }
+            | FrontendEvent::ToolCallStarted { .. }
+            | FrontendEvent::ToolCallFinished { .. }
+            | FrontendEvent::RetryScheduled { .. }
+            | FrontendEvent::Reminder { .. }
+            | FrontendEvent::Error { .. }
+            | FrontendEvent::SessionEnded { .. } => DeliveryMode::MustDeliver,
+        }
     }
 }
 
@@ -69,29 +86,125 @@ pub enum EmitOutcome {
     Coalesced,
 }
 
+#[derive(Debug, Default)]
+struct BestEffortBacklog {
+    assistant_delta: Option<String>,
+    thinking: Option<String>,
+    status: Option<String>,
+}
+
+impl BestEffortBacklog {
+    fn push(&mut self, event: FrontendEvent) {
+        match event {
+            FrontendEvent::AssistantMessageDelta { delta } => {
+                self.assistant_delta = Some(delta);
+            }
+            FrontendEvent::Thinking { text } => {
+                self.thinking = Some(text);
+            }
+            FrontendEvent::Status { message } => {
+                self.status = Some(message);
+            }
+            _ => {}
+        }
+    }
+
+    fn pop_next(&mut self) -> Option<FrontendEvent> {
+        if let Some(delta) = self.assistant_delta.take() {
+            return Some(FrontendEvent::AssistantMessageDelta { delta });
+        }
+
+        if let Some(text) = self.thinking.take() {
+            return Some(FrontendEvent::Thinking { text });
+        }
+
+        self.status
+            .take()
+            .map(|message| FrontendEvent::Status { message })
+    }
+}
+
 #[derive(Debug, Clone)]
 pub struct FrontendEventSender {
     tx: mpsc::Sender<FrontendEvent>,
+    backlog: Arc<Mutex<BestEffortBacklog>>,
 }
 
 impl FrontendEventSender {
     pub fn new(tx: mpsc::Sender<FrontendEvent>) -> Self {
-        Self { tx }
+        Self {
+            tx,
+            backlog: Arc::new(Mutex::new(BestEffortBacklog::default())),
+        }
     }
 
     pub async fn emit(
         &self,
         event: FrontendEvent,
     ) -> Result<EmitOutcome, mpsc::error::SendError<FrontendEvent>> {
-        self.tx.send(event).await?;
-        Ok(EmitOutcome::Delivered)
+        match event.delivery_mode() {
+            DeliveryMode::MustDeliver => {
+                self.tx.send(event).await?;
+                Ok(EmitOutcome::Delivered)
+            }
+            DeliveryMode::BestEffort => self.try_emit_best_effort(event).await,
+        }
+    }
+
+    async fn try_emit_best_effort(
+        &self,
+        event: FrontendEvent,
+    ) -> Result<EmitOutcome, mpsc::error::SendError<FrontendEvent>> {
+        match self.tx.try_send(event) {
+            Ok(()) => Ok(EmitOutcome::Delivered),
+            Err(mpsc::error::TrySendError::Full(event)) => {
+                self.backlog.lock().await.push(event);
+                Ok(EmitOutcome::Coalesced)
+            }
+            Err(mpsc::error::TrySendError::Closed(event)) => {
+                Err(mpsc::error::SendError(event))
+            }
+        }
     }
 
     pub async fn flush_best_effort(
         &self,
     ) -> Result<usize, mpsc::error::SendError<FrontendEvent>> {
-        Ok(0)
+        let mut flushed = 0;
+
+        loop {
+            let next_event = {
+                let mut backlog = self.backlog.lock().await;
+                backlog.pop_next()
+            };
+
+            let Some(event) = next_event else {
+                break;
+            };
+
+            match self.tx.try_send(event) {
+                Ok(()) => flushed += 1,
+                Err(mpsc::error::TrySendError::Full(event)) => {
+                    self.backlog.lock().await.push(event);
+                    break;
+                }
+                Err(mpsc::error::TrySendError::Closed(event)) => {
+                    return Err(mpsc::error::SendError(event));
+                }
+            }
+        }
+
+        Ok(flushed)
     }
+}
+
+/// Commands are always sent with `send().await` so adapters backpressure user input
+/// instead of dropping it.
+pub async fn send_frontend_command(
+    tx: &FrontendCommandSender,
+    command: FrontendCommand,
+) -> Result<(), mpsc::error::SendError<FrontendCommand>> {
+    tx.send(command).await
 }
 
 pub fn frontend_command_channel(
@@ -129,11 +242,17 @@ mod tests {
     #[test]
     fn protocol_module_is_cli_framework_agnostic() {
         let source = include_str!("protocol.rs");
+        let production_source = source.split("#[cfg(test)]").next().unwrap_or(source);
+        let forbidden_terms = [
+            ["rata", "tui"].concat(),
+            ["reed", "line"].concat(),
+            ["std", "out"].concat(),
+            ["std", "err"].concat(),
+        ];
 
-        assert!(!source.contains("ratatui"));
-        assert!(!source.contains("reedline"));
-        assert!(!source.contains("stdout"));
-        assert!(!source.contains("stderr"));
+        for forbidden in forbidden_terms {
+            assert!(!production_source.contains(&forbidden));
+        }
     }
 
     #[tokio::test]
