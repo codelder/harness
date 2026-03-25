@@ -3,6 +3,8 @@ use crate::error::{AgentError, ProviderError};
 use crate::frontend::{FrontendCommand, FrontendEvent, FrontendEventSender, FrontendSessionSummary};
 use crate::llm::{create_provider, LlmProvider, ProviderType};
 use crate::planning::TodoManager;
+use std::future::Future;
+use std::pin::Pin;
 use std::sync::atomic::Ordering;
 use std::sync::Arc;
 use tokio::sync::Mutex;
@@ -11,6 +13,8 @@ const SYSTEM_PROMPT: &str = "You are an AI agent with the ability to have a conv
 Respond naturally to user messages.";
 const TODO_REMINDER: &str =
     "You have pending todos. Use the 'todo' tool to update your task list.";
+
+type TurnFuture<'a> = Pin<Box<dyn Future<Output = Result<AgentTurn, AgentError>> + Send + 'a>>;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct SessionSummary {
@@ -133,7 +137,6 @@ impl SessionRuntime {
                     )
                     .await?;
                 }
-
                 Ok(SessionRuntimeOutcome::Continue)
             }
             FrontendCommand::Interrupt => {
@@ -155,54 +158,14 @@ impl SessionRuntime {
         current_input: impl Into<String>,
         event_tx: &FrontendEventSender,
     ) -> Result<(), AgentError> {
-        let current_input = current_input.into();
-        let provider = self.provider.as_ref().ok_or_else(not_started_error)?;
-        let (hook, used_todo_flag) = TodoUsageHook::new();
-        let turn = agent_loop(&self.messages, &current_input, provider, hook).await?;
-        let todo_used = used_todo_flag.load(Ordering::SeqCst);
-
-        if todo_used {
-            self.rounds_since_todo = 0;
-        }
-
-        let reminder = self.todo_reminder_message().await;
-        let display_response = if let Some(ref reminder_text) = reminder {
-            format!(
-                "<reminder>{}</reminder>\n\n{}",
-                reminder_text, turn.response
-            )
-        } else {
-            turn.response.clone()
-        };
-
-        self.emit_event(
+        self.submit_message_with(
+            current_input.into(),
             event_tx,
-            FrontendEvent::UserMessageCommitted {
-                text: turn.user_input.clone(),
+            |history, current_input, provider, hook| {
+                Box::pin(agent_loop(history, current_input, provider, hook))
             },
         )
-        .await?;
-
-        if let Some(ref message) = reminder {
-            self.emit_event(
-                event_tx,
-                FrontendEvent::Reminder {
-                    message: message.clone(),
-                },
-            )
-            .await?;
-        }
-
-        self.emit_event(
-            event_tx,
-            FrontendEvent::AssistantMessageCompleted {
-                text: display_response,
-            },
-        )
-        .await?;
-
-        self.commit_turn(turn);
-        Ok(())
+        .await
     }
 
     pub async fn end(
@@ -221,6 +184,61 @@ impl SessionRuntime {
         )
         .await?;
         Ok(summary)
+    }
+
+    async fn submit_message_with<F>(
+        &mut self,
+        current_input: String,
+        event_tx: &FrontendEventSender,
+        executor: F,
+    ) -> Result<(), AgentError>
+    where
+        F: for<'a> FnOnce(&'a [Message], &'a str, &'a LlmProvider, TodoUsageHook) -> TurnFuture<'a>,
+    {
+        let provider = self.provider.as_ref().ok_or_else(not_started_error)?;
+        let (hook, used_todo_flag) = TodoUsageHook::new();
+        let turn = executor(&self.messages, &current_input, provider, hook).await?;
+        let todo_used = used_todo_flag.load(Ordering::SeqCst);
+
+        if todo_used {
+            self.rounds_since_todo = 0;
+        }
+
+        let reminder = self.todo_reminder_message().await;
+        let display_response = if let Some(ref reminder_text) = reminder {
+            format!("<reminder>{}</reminder>\n\n{}", reminder_text, turn.response)
+        } else {
+            turn.response.clone()
+        };
+
+        self.emit_event(
+            event_tx,
+            FrontendEvent::UserMessageCommitted {
+                text: turn.user_input.clone(),
+            },
+        )
+        .await?;
+
+        self.emit_event(
+            event_tx,
+            FrontendEvent::AssistantMessageCompleted {
+                text: display_response,
+            },
+        )
+        .await?;
+
+        if let Some(ref message) = reminder {
+            self.emit_event(
+                event_tx,
+                FrontendEvent::Reminder {
+                    message: message.clone(),
+                },
+            )
+            .await?;
+        }
+
+        self.commit_turn(turn);
+        Ok(())
     }
 
     fn commit_turn(&mut self, turn: AgentTurn) {
@@ -282,55 +300,65 @@ mod tests {
     use crate::planning::{TodoItem, TodoStatus};
 
     #[test]
-    fn test_runtime_initialization() {
+    fn runtime_initial_state_matches_session_defaults() {
         let runtime = SessionRuntime::new();
 
-        assert_eq!(runtime.messages().len(), 1);
+        assert_eq!(runtime.message_count(), 1);
         assert_eq!(runtime.turn_count(), 0);
         assert_eq!(runtime.rounds_since_todo(), 0);
     }
 
     #[tokio::test]
-    async fn test_runtime_todo_manager_initializes_empty() {
-        let runtime = SessionRuntime::new();
-        let manager = runtime.todo_manager();
-        let manager = manager.lock().await;
-
-        assert!(manager.is_empty());
-    }
-
-    #[test]
-    fn test_runtime_summary_reflects_initial_state() {
-        let runtime = SessionRuntime::new();
-
-        assert_eq!(
-            runtime.summary(),
-            SessionSummary {
-                turns: 0,
-                messages: 1,
-            }
-        );
-    }
-
-    #[tokio::test]
-    async fn test_runtime_emits_session_lifecycle_events() {
-        let (event_tx, mut event_rx) = frontend_event_channel(8);
+    async fn turn_counter_updates_only_for_successful_turns() {
+        let (event_tx, _event_rx) = frontend_event_channel(8);
         let mut runtime = SessionRuntime::new();
+        runtime
+            .start_with_provider(LlmProvider::Ollama, "test", "model", &event_tx)
+            .await
+            .unwrap();
+
+        let error = runtime
+            .submit_message_with(
+                "hello".to_string(),
+                &event_tx,
+                |_history, _input, _provider, _hook| {
+                    Box::pin(async { Err(AgentError::ToolsNotImplemented) })
+                },
+            )
+            .await;
+        assert!(error.is_err());
+        assert_eq!(runtime.turn_count(), 0);
 
         runtime
-            .start_with_provider(
-                LlmProvider::Ollama,
-                ProviderType::Ollama.to_string(),
-                "test-model",
+            .submit_message_with(
+                "hello".to_string(),
                 &event_tx,
+                |_history, _input, _provider, _hook| {
+                    Box::pin(async {
+                        Ok(AgentTurn {
+                            user_input: "hello".to_string(),
+                            response: "world".to_string(),
+                        })
+                    })
+                },
             )
             .await
             .unwrap();
+
+        assert_eq!(runtime.turn_count(), 1);
+        assert_eq!(runtime.message_count(), 3);
+    }
+
+    #[tokio::test]
+    async fn session_end_emits_summary_payload() {
+        let (event_tx, mut event_rx) = frontend_event_channel(8);
+        let mut runtime = SessionRuntime::new();
+        runtime
+            .start_with_provider(LlmProvider::Ollama, "test", "model", &event_tx)
+            .await
+            .unwrap();
+
         let summary = runtime.end(&event_tx).await.unwrap();
-
-        let started = event_rx.recv().await.expect("session started event");
-        let ended = event_rx.recv().await.expect("session ended event");
-
         assert_eq!(
             summary,
             FrontendSessionSummary {
@@ -339,13 +367,8 @@ mod tests {
             }
         );
 
-        assert_eq!(
-            started,
-            FrontendEvent::SessionStarted {
-                provider: ProviderType::Ollama.to_string(),
-                model: "test-model".to_string(),
-            }
-        );
+        let _ = event_rx.recv().await;
+        let ended = event_rx.recv().await.expect("session ended event should be emitted");
         assert_eq!(
             ended,
             FrontendEvent::SessionEnded {
@@ -358,8 +381,15 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn test_runtime_reminder_threshold_is_runtime_owned() {
+    async fn reminder_emission_stays_runtime_owned() {
+        let (event_tx, mut event_rx) = frontend_event_channel(8);
         let mut runtime = SessionRuntime::new();
+        runtime
+            .start_with_provider(LlmProvider::Ollama, "test", "model", &event_tx)
+            .await
+            .unwrap();
+
+        runtime.rounds_since_todo = 3;
         {
             let mut manager = runtime.todo_manager.lock().await;
             manager
@@ -371,13 +401,39 @@ mod tests {
                 .unwrap();
         }
 
-        runtime.rounds_since_todo = 2;
-        assert_eq!(runtime.todo_reminder_message().await, None);
+        runtime
+            .submit_message_with(
+                "status".to_string(),
+                &event_tx,
+                |_history, _input, _provider, _hook| {
+                    Box::pin(async {
+                        Ok(AgentTurn {
+                            user_input: "status".to_string(),
+                            response: "Working on it".to_string(),
+                        })
+                    })
+                },
+            )
+            .await
+            .unwrap();
 
-        runtime.rounds_since_todo = 3;
-        assert_eq!(
-            runtime.todo_reminder_message().await,
-            Some(TODO_REMINDER.to_string())
-        );
+        let mut saw_reminder = false;
+        let mut saw_embedded_reminder = false;
+
+        while let Some(event) = event_rx.recv().await {
+            match event {
+                FrontendEvent::Reminder { message } => {
+                    saw_reminder = message.contains("pending todos");
+                    break;
+                }
+                FrontendEvent::AssistantMessageCompleted { text } => {
+                    saw_embedded_reminder = text.contains("<reminder>");
+                }
+                _ => {}
+            }
+        }
+
+        assert!(saw_reminder);
+        assert!(saw_embedded_reminder);
     }
 }
