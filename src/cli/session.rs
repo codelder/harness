@@ -1,36 +1,39 @@
-use crate::error::AgentError;
+use crate::cli::app::CliApp;
+use crate::cli::terminal::{spawn_input_listener, TerminalGuard};
+use crate::error::{AgentError, ProviderError};
 use crate::frontend::{
+    frontend_command_channel,
     frontend_event_channel,
+    send_frontend_command,
     FrontendCommand,
-    FrontendEvent,
+    FrontendCommandReceiver,
+    FrontendCommandSender,
     FrontendEventReceiver,
 };
 use crate::session::{SessionRuntime, SessionRuntimeConfig, SessionRuntimeOutcome};
-use reedline::{DefaultPrompt, DefaultPromptSegment, Reedline, Signal};
-use std::io::Write;
+use crossterm::event::KeyEvent;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
-use tokio::sync::Mutex;
-use tracing::{debug, error, info, warn};
+use std::time::Duration;
+use tokio::sync::{mpsc, Mutex};
+use tracing::{error, info};
 
-/// Interactive REPL session
+/// Interactive ratatui-backed session.
 pub struct Session {
     runtime: SessionRuntime,
 }
 
 impl Session {
-    /// Create a new session with minimal system prompt
     pub fn new() -> Self {
         Self {
             runtime: SessionRuntime::new(),
         }
     }
 
-    /// Get a clone of the shared TodoManager for tool creation
     pub fn todo_manager(&self) -> Arc<Mutex<crate::planning::TodoManager>> {
         self.runtime.todo_manager()
     }
 
-    /// Run the interactive REPL session
     pub async fn run(
         &mut self,
         provider_type: crate::llm::ProviderType,
@@ -40,7 +43,10 @@ impl Session {
         thinking_budget: u64,
     ) -> Result<(), AgentError> {
         let (event_tx, mut event_rx) = frontend_event_channel(64);
-        self.runtime
+        let (command_tx, command_rx) = frontend_command_channel(32);
+
+        let mut runtime = std::mem::take(&mut self.runtime);
+        runtime
             .start(
                 SessionRuntimeConfig {
                     provider_type,
@@ -54,122 +60,82 @@ impl Session {
             .await?;
         info!(provider = ?provider_type, model = model, thinking = thinking, "Session initialized");
 
-        println!("Agent Harness v0.1.0");
-        println!("Provider: {} | Model: {}", provider_type, model);
-        if thinking {
-            println!("Extended thinking: enabled (budget: {} tokens)", thinking_budget);
+        let runtime_handle = tokio::spawn(run_runtime_loop(runtime, command_rx, event_tx.clone()));
+        let stop_flag = Arc::new(AtomicBool::new(false));
+        let (input_handle, mut input_rx) = spawn_input_listener(stop_flag.clone());
+        let mut terminal = TerminalGuard::new().map_err(terminal_error)?;
+        let mut app = CliApp::new();
+
+        let loop_result = self
+            .run_ui_loop(
+                &mut app,
+                &mut terminal,
+                &command_tx,
+                &mut event_rx,
+                &mut input_rx,
+            )
+            .await;
+
+        if loop_result.is_err() && !app.exit_requested() {
+            let _ = send_frontend_command(&command_tx, FrontendCommand::Exit).await;
         }
-        println!("Type your message and press Enter. Ctrl+C or Ctrl+D to exit.\n");
-        Self::drain_events(&mut event_rx);
 
-        let prompt = DefaultPrompt::new(
-            DefaultPromptSegment::Basic("You".to_string()),
-            DefaultPromptSegment::Empty,
-        );
+        stop_flag.store(true, Ordering::SeqCst);
+        drop(input_rx);
+        drop(command_tx);
 
+        let _ = input_handle.await.map_err(join_error)?.map_err(terminal_task_error);
+        self.runtime = runtime_handle
+            .await
+            .map_err(join_error)?
+            .map_err(|error| {
+                error!(error = %error, "Runtime loop failed");
+                error
+            })?;
+
+        loop_result
+    }
+
+    async fn run_ui_loop(
+        &mut self,
+        app: &mut CliApp,
+        terminal: &mut TerminalGuard,
+        command_tx: &FrontendCommandSender,
+        event_rx: &mut FrontendEventReceiver,
+        input_rx: &mut mpsc::UnboundedReceiver<KeyEvent>,
+    ) -> Result<(), AgentError> {
         loop {
-            debug!("Waiting for user input");
-            let prompt = prompt.clone();
-            let result = tokio::task::spawn_blocking(move || Reedline::create().read_line(&prompt)).await;
+            Self::drain_events(app, event_rx);
+            terminal.draw(|frame| app.render(frame)).map_err(terminal_error)?;
 
-            match result {
-                Ok(Ok(Signal::Success(line))) => {
-                    let line = line.trim();
-                    if line.is_empty() {
-                        continue;
-                    }
+            if app.should_exit() {
+                return Ok(());
+            }
 
-                    if line == "exit" || line == "quit" {
-                        info!("User requested exit via command");
-                        let _ = self.runtime.handle_command(FrontendCommand::Exit, &event_tx).await?;
-                        Self::drain_events(&mut event_rx);
-                        return Ok(());
-                    }
-
-                    info!(input = line, "User input received");
-
-                    print!("Agent: ");
-                    if let Err(e) = std::io::stdout().flush() {
-                        warn!("Failed to flush stdout: {}", e);
-                    }
-
-                    match self
-                        .runtime
-                        .handle_command(FrontendCommand::SubmitMessage(line.to_string()), &event_tx)
-                        .await
-                    {
-                        Ok(SessionRuntimeOutcome::Continue | SessionRuntimeOutcome::Interrupted) => {}
-                        Ok(SessionRuntimeOutcome::Exit(_)) => {
-                            Self::drain_events(&mut event_rx);
-                            return Ok(());
+            tokio::select! {
+                maybe_key = input_rx.recv() => {
+                    match maybe_key {
+                        Some(key) => {
+                            if let Some(command) = app.handle_key_event(key) {
+                                if matches!(command, FrontendCommand::Exit) {
+                                    app.mark_exit_requested();
+                                }
+                                send_frontend_command(command_tx, command)
+                                    .await
+                                    .map_err(command_channel_closed)?;
+                            }
                         }
-                        Err(e) => {
-                            error!(error = %e, "Runtime command error");
-                            eprintln!("\nError: {}", e);
-                        }
+                        None => return Ok(()),
                     }
-
-                    Self::drain_events(&mut event_rx);
                 }
-                Ok(Ok(Signal::CtrlC)) => {
-                    info!("User pressed Ctrl+C, exiting");
-                    let _ = self.runtime.handle_command(FrontendCommand::Exit, &event_tx).await?;
-                    Self::drain_events(&mut event_rx);
-                    return Ok(());
-                }
-                Ok(Ok(Signal::CtrlD)) => {
-                    info!("User pressed Ctrl+D, exiting");
-                    let _ = self.runtime.handle_command(FrontendCommand::Exit, &event_tx).await?;
-                    Self::drain_events(&mut event_rx);
-                    return Ok(());
-                }
-                Ok(Err(err)) => {
-                    error!(error = %err, "Reedline error");
-                    eprintln!("\nTerminal error: {}", err);
-                    eprintln!("This may be a terminal compatibility issue. Trying to continue...\n");
-
-                    if err.to_string().contains("cursor position") {
-                        std::thread::sleep(std::time::Duration::from_millis(100));
-                    }
-                    continue;
-                }
-                Err(err) => {
-                    error!(error = %err, "spawn_blocking join error");
-                    eprintln!("Error: {}", err);
-                    let _ = self.runtime.handle_command(FrontendCommand::Exit, &event_tx).await?;
-                    Self::drain_events(&mut event_rx);
-                    return Err(AgentError::Provider(crate::error::ProviderError::RequestFailed(
-                        err.to_string(),
-                    )));
-                }
+                _ = tokio::time::sleep(Duration::from_millis(50)) => {}
             }
         }
     }
 
-    fn drain_events(event_rx: &mut FrontendEventReceiver) {
+    fn drain_events(app: &mut CliApp, event_rx: &mut FrontendEventReceiver) {
         while let Ok(event) = event_rx.try_recv() {
-            Self::render_event(event);
-        }
-    }
-
-    fn render_event(event: FrontendEvent) {
-        match event {
-            FrontendEvent::AssistantMessageCompleted { text } => println!("{}", text),
-            FrontendEvent::Error { message } => eprintln!("\nError: {}", message),
-            FrontendEvent::SessionEnded { summary } => {
-                println!("\nSession Summary:");
-                println!("  Turns: {}", summary.turns);
-                println!("  Messages: {}", summary.message_count);
-            }
-            FrontendEvent::Status { message } => eprintln!("\n{}", message),
-            FrontendEvent::Reminder { .. }
-            | FrontendEvent::SessionStarted { .. }
-            | FrontendEvent::UserMessageCommitted { .. }
-            | FrontendEvent::AssistantMessageDelta { .. }
-            | FrontendEvent::Thinking { .. }
-            | FrontendEvent::ToolCallStarted { .. }
-            | FrontendEvent::ToolCallFinished { .. }
-            | FrontendEvent::RetryScheduled { .. } => {}
+            app.apply_event(event);
         }
     }
 }
@@ -178,6 +144,50 @@ impl Default for Session {
     fn default() -> Self {
         Self::new()
     }
+}
+
+async fn run_runtime_loop(
+    mut runtime: SessionRuntime,
+    mut command_rx: FrontendCommandReceiver,
+    event_tx: crate::frontend::FrontendEventSender,
+) -> Result<SessionRuntime, AgentError> {
+    while let Some(command) = command_rx.recv().await {
+        if matches!(
+            runtime.handle_command(command, &event_tx).await?,
+            SessionRuntimeOutcome::Exit(_)
+        ) {
+            break;
+        }
+    }
+
+    Ok(runtime)
+}
+
+fn terminal_error(error: std::io::Error) -> AgentError {
+    AgentError::Provider(ProviderError::RequestFailed(format!(
+        "Terminal error: {}",
+        error
+    )))
+}
+
+fn terminal_task_error(error: String) -> AgentError {
+    AgentError::Provider(ProviderError::RequestFailed(format!(
+        "Terminal input task error: {}",
+        error
+    )))
+}
+
+fn join_error(error: tokio::task::JoinError) -> AgentError {
+    AgentError::Provider(ProviderError::RequestFailed(error.to_string()))
+}
+
+fn command_channel_closed(
+    error: tokio::sync::mpsc::error::SendError<FrontendCommand>,
+) -> AgentError {
+    AgentError::Provider(ProviderError::RequestFailed(format!(
+        "Frontend command channel closed: {}",
+        error
+    )))
 }
 
 #[cfg(test)]
