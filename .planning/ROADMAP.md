@@ -45,9 +45,48 @@ See: [v0.3-ROADMAP.md](milestones/v0.3-ROADMAP.md)
 
 </details>
 
+### ⚡ Inserted Work (Planned)
+
+- [ ] **Phase 3.2: Terminal UI and Frontend Interface Abstraction (INSERTED)** — Replace reedline with ratatui and define a shared interface for CLI, web, desktop, and social frontends
+
 ### 📋 v0.4 Subagents (Planned)
 
 - [ ] **Phase 4: s04 - Subagents** — Subagent spawning with isolated context
+
+### Phase 3.2: Terminal UI and Frontend Interface Abstraction (INSERTED)
+
+**Goal**: Replace the reedline-based REPL with a ratatui-driven terminal experience and introduce a shared frontend session interface that can connect the agent loop to CLI, web, desktop, and social surfaces.
+**Depends on**: Phase 3.1
+**Requirements**: TBD
+**Success Criteria** (what must be TRUE):
+
+  1. The interactive terminal experience runs on ratatui instead of reedline
+  2. The agent loop no longer depends directly on CLI-specific input/output primitives
+  3. A shared frontend/session interface can drive the existing CLI and future web, desktop, or social adapters
+  4. Streaming model output, tool activity, and user interrupts can be represented through the shared interface
+  5. Existing session lifecycle behavior remains functional during the migration
+
+**Plans**: 4 plans in 4 waves
+
+Plans:
+- [x] 3.2-01-PLAN.md — Extract shared runtime and typed frontend protocol
+- [ ] 3.2-02-PLAN.md — Refactor hook/retry observability into structured events
+- [ ] 3.2-03-PLAN.md — Implement ratatui CLI adapter and main boot integration
+- [ ] 3.2-04-PLAN.md — Add migration verification, cleanup, and regression coverage
+
+### Phase 4: s04 - Subagents
+
+**Goal**: Agent can delegate subtasks to isolated child contexts
+**Depends on**: Phase 3
+**Requirements**: PLAN-02, CROSS-02, CROSS-03, CROSS-04
+**Success Criteria** (what must be TRUE):
+
+  1. Agent can spawn child agents with fresh message arrays
+  2. Child agents execute independently without polluting parent context
+  3. Parent receives summarized results when child completes
+  4. Child agent errors are handled gracefully without crashing parent
+
+**Plans**: TBD
 
 ### 📋 v1.0 Core (Planned)
 
@@ -71,6 +110,7 @@ See: [v0.3-ROADMAP.md](milestones/v0.3-ROADMAP.md)
 | 2. s02 - Tool Use | v0.2 | 3/3 | Complete | 2026-03-23 |
 | 3. s03 - TodoWrite | v0.3 | 4/4 | Complete | 2026-03-24 |
 | 3.1 Code Review Fixes | v0.3 | 1/1 | Complete | 2026-03-24 |
+| 3.2 Terminal UI + Frontend Interface | v0.4 | 1/4 | In Progress | - |
 | 4. s04 - Subagents | v0.4 | 0/TBD | Not started | - |
 | 5. s05 - Skills | v1.0 | 0/TBD | Not started | - |
 | 6. s06 - Context Compact | v1.0 | 0/TBD | Not started | - |

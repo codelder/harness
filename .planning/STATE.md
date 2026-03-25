@@ -2,14 +2,14 @@
 gsd_state_version: 1.0
 milestone: v0.4
 milestone_name: Subagents
-status: Planning next milestone
-last_updated: "2026-03-24T00:42:00Z"
-last_activity: 2026-03-24
+status: Executing Phase 03.2
+last_updated: "2026-03-25T01:20:13.462Z"
+last_activity: 2026-03-25
 progress:
-  total_phases: 0
+  total_phases: 2
   completed_phases: 0
-  total_plans: 0
-  completed_plans: 0
+  total_plans: 4
+  completed_plans: 1
 ---
 
 # Project State
@@ -19,7 +19,7 @@ progress:
 See: .planning/PROJECT.md (updated 2026-03-24)
 
 **Core value:** Performance and safety without sacrificing capability
-**Current focus:** Planning v0.4 Subagents milestone
+**Current focus:** Phase 03.2 — terminal-ui-and-frontend-interface-abstraction
 
 ## Milestone History
 
@@ -31,14 +31,21 @@ See: .planning/PROJECT.md (updated 2026-03-24)
 
 ## Current Position
 
-Phase: Not started
-Plan: Not started
+Phase: 03.2 (terminal-ui-and-frontend-interface-abstraction) — EXECUTING
+Plan: 2 of 4
 
 ## Accumulated Context
+
+### Roadmap Evolution
+
+- Phase 3.2 inserted after Phase 3.1: Replace reedline CLI UI with ratatui and add a unified frontend interface for CLI/Web/Desktop/Social channels (URGENT)
 
 ### Decisions
 
 Decisions are logged in PROJECT.md Key Decisions table.
+
+- [Phase 03.2]: Keep the reedline CLI as a thin wrapper over SessionRuntime during migration. — This keeps current terminal behavior working while moving session lifecycle ownership behind a reusable runtime boundary for later ratatui and non-terminal adapters.
+- [Phase 03.2]: Use tokio::sync::mpsc with must-deliver versus best-effort frontend event classes at the runtime boundary. — Adapters need a bounded channel contract that preserves lifecycle and transcript-completion events while allowing high-frequency status traffic to coalesce without blocking the runtime.
 
 ### Pending Todos
 
@@ -50,4 +57,4 @@ None.
 
 ## Session Continuity
 
-Last activity: 2026-03-24
+Last activity: 2026-03-25
