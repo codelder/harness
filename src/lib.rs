@@ -13,6 +13,8 @@ pub use llm::{create_provider, LlmProvider, ProviderType};
 pub use agent::{agent_loop, with_retry, Message, Role};
 pub use cli::{Args, Provider, Session};
 pub use frontend::{
+    frontend_command_channel,
+    frontend_event_channel,
     FrontendCommand,
     FrontendCommandReceiver,
     FrontendCommandSender,

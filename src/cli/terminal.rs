@@ -86,3 +86,15 @@ pub fn spawn_input_listener(
 
     (handle, rx)
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn restore_is_idempotent_without_active_terminal() {
+        let mut guard = TerminalGuard { terminal: None };
+        assert!(guard.restore().is_ok());
+        assert!(guard.restore().is_ok());
+    }
+}
