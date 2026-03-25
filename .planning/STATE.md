@@ -3,13 +3,13 @@ gsd_state_version: 1.0
 milestone: v0.4
 milestone_name: Subagents
 status: Executing Phase 03.2
-last_updated: "2026-03-25T01:27:23.856Z"
+last_updated: "2026-03-25T01:34:37.020Z"
 last_activity: 2026-03-25
 progress:
   total_phases: 2
   completed_phases: 0
   total_plans: 4
-  completed_plans: 2
+  completed_plans: 3
 ---
 
 # Project State
@@ -32,7 +32,7 @@ See: .planning/PROJECT.md (updated 2026-03-24)
 ## Current Position
 
 Phase: 03.2 (terminal-ui-and-frontend-interface-abstraction) — EXECUTING
-Plan: 3 of 4
+Plan: 4 of 4
 
 ## Accumulated Context
 
@@ -48,6 +48,8 @@ Decisions are logged in PROJECT.md Key Decisions table.
 - [Phase 03.2]: Use tokio::sync::mpsc with must-deliver versus best-effort frontend event classes at the runtime boundary. — Adapters need a bounded channel contract that preserves lifecycle and transcript-completion events while allowing high-frequency status traffic to coalesce without blocking the runtime.
 - [Phase 03.2]: Extend TodoUsageHook with a FrontendEventSender side channel instead of introducing a second hook type. — This preserves direct todo detection semantics and PromptHook integration while giving runtime/frontends a structured event escape hatch.
 - [Phase 03.2]: Move retry reporting into a notifier callback passed to with_retry. — The retry helper now stays terminal-agnostic while still surfacing retry metadata to any frontend that listens to FrontendEventSender.
+- [Phase 03.2]: Use a reducer-style CliApp over FrontendEvent and FrontendCommand instead of embedding UI state inside SessionRuntime. — This keeps rendering and keyboard behavior testable without a live terminal while preserving the shared runtime boundary for future non-terminal adapters.
+- [Phase 03.2]: Centralize raw-mode and alternate-screen ownership in TerminalGuard with a dedicated crossterm input listener task. — This keeps terminal lifecycle restoration explicit and limits terminal side effects to one module instead of scattering them across main/session code.
 
 ### Pending Todos
 
