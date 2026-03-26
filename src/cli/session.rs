@@ -1,12 +1,11 @@
 use crate::cli::app::CliApp;
-use crate::cli::terminal::{spawn_input_listener, TerminalGuard};
+use crate::cli::terminal::{spawn_input_listener, InputEvent, TerminalGuard};
 use crate::error::{AgentError, ProviderError};
 use crate::frontend::{
     frontend_command_channel, frontend_event_channel, send_frontend_command, FrontendCommand,
     FrontendCommandReceiver, FrontendCommandSender, FrontendEventReceiver, FrontendEventSender,
 };
 use crate::session::{SessionRuntime, SessionRuntimeConfig, SessionRuntimeOutcome};
-use crossterm::event::KeyEvent;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 use std::time::Duration;
@@ -101,7 +100,7 @@ impl Session {
         command_tx: &FrontendCommandSender,
         event_tx: &FrontendEventSender,
         event_rx: &mut FrontendEventReceiver,
-        input_rx: &mut mpsc::UnboundedReceiver<KeyEvent>,
+        input_rx: &mut mpsc::UnboundedReceiver<InputEvent>,
     ) -> Result<(), AgentError> {
         loop {
             Self::drain_events_and_flush(app, event_rx, event_tx).await?;
@@ -114,9 +113,9 @@ impl Session {
             flush_best_effort(event_tx).await?;
 
             tokio::select! {
-                maybe_key = input_rx.recv() => {
-                    match maybe_key {
-                        Some(key) => {
+                maybe_event = input_rx.recv() => {
+                    match maybe_event {
+                        Some(InputEvent::Key(key)) => {
                             if let Some(command) = app.handle_key_event(key) {
                                 if matches!(command, FrontendCommand::Exit) {
                                     app.mark_exit_requested();
@@ -125,6 +124,10 @@ impl Session {
                                     .await
                                     .map_err(command_channel_closed)?;
                             }
+                        }
+                        Some(InputEvent::Resize(_columns, _rows)) => {
+                            // Resize is handled by terminal guard - just trigger re-render
+                            let _ = terminal.handle_resize();
                         }
                         None => return Ok(()),
                     }
