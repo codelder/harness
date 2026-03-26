@@ -1,9 +1,7 @@
 use crate::frontend::{FrontendCommand, FrontendEvent, FrontendTodoItem, FrontendTodoStatus};
 use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
-use ratatui::backend::TestBackend;
-use ratatui::buffer::Buffer;
 use ratatui::layout::{Constraint, Direction, Layout, Rect};
-use ratatui::prelude::{Frame, Line, Terminal};
+use ratatui::prelude::{Frame, Line};
 use ratatui::style::{Modifier, Style};
 use ratatui::widgets::{Block, Borders, Paragraph, Wrap};
 use unicode_width::UnicodeWidthStr;
@@ -560,6 +558,9 @@ fn wrapped_line_count(text: &str, width: u16) -> u16 {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use ratatui::backend::TestBackend;
+    use ratatui::buffer::Buffer;
+    use ratatui::Terminal;
 
     fn render_buffer(app: &mut CliApp, width: u16, height: u16) -> Buffer {
         let backend = TestBackend::new(width, height);
@@ -726,6 +727,40 @@ mod tests {
             app.handle_key_event(KeyEvent::new(KeyCode::Esc, KeyModifiers::NONE)),
             Some(FrontendCommand::Exit)
         );
+    }
+
+    #[test]
+    fn assistant_deltas_append_within_the_active_turn() {
+        let mut app = CliApp::new();
+
+        app.apply_event(FrontendEvent::AssistantMessageDelta {
+            turn_id: 7,
+            delta: "hello".to_string(),
+        });
+        app.apply_event(FrontendEvent::AssistantMessageDelta {
+            turn_id: 7,
+            delta: " world".to_string(),
+        });
+
+        assert_eq!(
+            app.streaming_assistant,
+            Some(StreamingAssistant {
+                turn_id: 7,
+                text: "hello world".to_string(),
+            })
+        );
+
+        app.apply_event(FrontendEvent::AssistantMessageCompleted {
+            turn_id: 7,
+            text: "hello world".to_string(),
+        });
+
+        assert_eq!(app.streaming_assistant, None);
+        assert!(matches!(
+            app.timeline.last(),
+            Some(TimelineBlock::AssistantMessage { turn_id: 7, text })
+                if text == "hello world"
+        ));
     }
 
     #[test]
