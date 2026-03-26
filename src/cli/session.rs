@@ -9,6 +9,7 @@ use crate::frontend::{
     FrontendCommandReceiver,
     FrontendCommandSender,
     FrontendEventReceiver,
+    FrontendEventSender,
 };
 use crate::session::{SessionRuntime, SessionRuntimeConfig, SessionRuntimeOutcome};
 use crossterm::event::KeyEvent;
@@ -44,6 +45,8 @@ impl Session {
     ) -> Result<(), AgentError> {
         let (event_tx, mut event_rx) = frontend_event_channel(64);
         let (command_tx, command_rx) = frontend_command_channel(32);
+        let runtime_event_tx = event_tx.clone();
+        let ui_event_tx = event_tx.clone();
 
         let mut runtime = std::mem::take(&mut self.runtime);
         runtime
@@ -60,7 +63,7 @@ impl Session {
             .await?;
         info!(provider = ?provider_type, model = model, thinking = thinking, "Session initialized");
 
-        let runtime_handle = tokio::spawn(run_runtime_loop(runtime, command_rx, event_tx.clone()));
+        let runtime_handle = tokio::spawn(run_runtime_loop(runtime, command_rx, runtime_event_tx));
         let stop_flag = Arc::new(AtomicBool::new(false));
         let (input_handle, mut input_rx) = spawn_input_listener(stop_flag.clone());
         let mut terminal = TerminalGuard::new().map_err(terminal_error)?;
@@ -71,6 +74,7 @@ impl Session {
                 &mut app,
                 &mut terminal,
                 &command_tx,
+                &ui_event_tx,
                 &mut event_rx,
                 &mut input_rx,
             )
@@ -101,16 +105,20 @@ impl Session {
         app: &mut CliApp,
         terminal: &mut TerminalGuard,
         command_tx: &FrontendCommandSender,
+        event_tx: &FrontendEventSender,
         event_rx: &mut FrontendEventReceiver,
         input_rx: &mut mpsc::UnboundedReceiver<KeyEvent>,
     ) -> Result<(), AgentError> {
         loop {
             Self::drain_events(app, event_rx);
+            flush_best_effort(event_tx).await?;
             terminal.draw(|frame| app.render(frame)).map_err(terminal_error)?;
 
             if app.should_exit() {
                 return Ok(());
             }
+
+            flush_best_effort(event_tx).await?;
 
             tokio::select! {
                 maybe_key = input_rx.recv() => {
@@ -128,7 +136,9 @@ impl Session {
                         None => return Ok(()),
                     }
                 }
-                _ = tokio::time::sleep(Duration::from_millis(50)) => {}
+                _ = tokio::time::sleep(Duration::from_millis(50)) => {
+                    flush_best_effort(event_tx).await?;
+                }
             }
         }
     }
@@ -188,6 +198,23 @@ fn command_channel_closed(
         "Frontend command channel closed: {}",
         error
     )))
+}
+
+fn frontend_event_channel_closed(
+    error: tokio::sync::mpsc::error::SendError<crate::frontend::FrontendEvent>,
+) -> AgentError {
+    AgentError::Provider(ProviderError::RequestFailed(format!(
+        "Frontend event channel closed: {}",
+        error
+    )))
+}
+
+async fn flush_best_effort(event_tx: &FrontendEventSender) -> Result<(), AgentError> {
+    event_tx
+        .flush_best_effort()
+        .await
+        .map(|_| ())
+        .map_err(frontend_event_channel_closed)
 }
 
 #[cfg(test)]
