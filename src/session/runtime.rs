@@ -2,7 +2,7 @@ use crate::agent::{agent_loop, AgentTurn, Message, TodoUsageHook};
 use crate::error::{AgentError, ProviderError};
 use crate::frontend::{
     FrontendCommand, FrontendEvent, FrontendEventSender, FrontendSessionSummary, FrontendTodoItem,
-    FrontendTodoStatus, SESSION_START_TURN_ID,
+    FrontendTodoStatus, HARNESS_VERSION, SESSION_START_TURN_ID,
 };
 use crate::llm::{create_provider, LlmProvider, ProviderType};
 use crate::planning::{TodoItem, TodoManager, TodoStatus};
@@ -141,6 +141,7 @@ impl SessionRuntime {
                 provider: provider_name.into(),
                 model: model.into(),
                 working_directory,
+                version: HARNESS_VERSION.to_string(),
             },
         )
         .await?;
@@ -619,6 +620,7 @@ mod tests {
                 provider,
                 model,
                 working_directory: _,
+                version: _,
             }) if provider == "test" && model == "model"
         ));
         assert_eq!(
