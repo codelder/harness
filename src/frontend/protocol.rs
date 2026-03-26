@@ -4,6 +4,9 @@ use tokio::sync::{mpsc, Mutex};
 /// Default bounded channel capacity between the runtime and any frontend adapter.
 pub const DEFAULT_FRONTEND_CHANNEL_CAPACITY: usize = 64;
 
+/// Reserved turn id for session-start snapshots and pre-turn metadata.
+pub const SESSION_START_TURN_ID: u64 = 0;
+
 /// Typed commands sent from an adapter to the shared runtime.
 pub type FrontendCommandSender = mpsc::Sender<FrontendCommand>;
 pub type FrontendCommandReceiver = mpsc::Receiver<FrontendCommand>;
@@ -16,6 +19,20 @@ pub type FrontendEventReceiver = mpsc::Receiver<FrontendEvent>;
 pub struct FrontendSessionSummary {
     pub turns: u32,
     pub message_count: u32,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum FrontendTodoStatus {
+    Pending,
+    InProgress,
+    Completed,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct FrontendTodoItem {
+    pub id: u32,
+    pub text: String,
+    pub status: FrontendTodoStatus,
 }
 
 /// Minimal user intent surface for v1 adapters.
@@ -42,23 +59,63 @@ pub enum DeliveryMode {
 ///   into the latest reducer-visible value so adapters can flush it later
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum FrontendEvent {
-    SessionStarted { provider: String, model: String },
-    UserMessageCommitted { text: String },
-    AssistantMessageDelta { delta: String },
-    AssistantMessageCompleted { text: String },
-    Thinking { text: String },
-    ToolCallStarted { name: String, args_preview: String },
-    ToolCallFinished { name: String, result_preview: String },
+    SessionStarted {
+        provider: String,
+        model: String,
+    },
+    UserMessageCommitted {
+        turn_id: u64,
+        text: String,
+    },
+    AssistantMessageDelta {
+        turn_id: u64,
+        delta: String,
+    },
+    AssistantMessageCompleted {
+        turn_id: u64,
+        text: String,
+    },
+    Thinking {
+        turn_id: u64,
+        text: String,
+    },
+    ToolCallStarted {
+        turn_id: u64,
+        call_id: String,
+        name: String,
+        args_preview: String,
+    },
+    ToolCallFinished {
+        turn_id: u64,
+        call_id: String,
+        name: String,
+        result_preview: String,
+    },
     RetryScheduled {
+        turn_id: u64,
         attempt: u32,
         max_retries: u32,
         delay_ms: u64,
         reason: String,
     },
-    Reminder { message: String },
-    Status { message: String },
-    Error { message: String },
-    SessionEnded { summary: FrontendSessionSummary },
+    Reminder {
+        turn_id: u64,
+        message: String,
+    },
+    TodoSnapshot {
+        turn_id: u64,
+        items: Vec<FrontendTodoItem>,
+    },
+    Status {
+        message: String,
+    },
+    Error {
+        turn_id: u64,
+        message: String,
+    },
+    SessionEnded {
+        summary: FrontendSessionSummary,
+    },
 }
 
 impl FrontendEvent {
@@ -74,6 +131,7 @@ impl FrontendEvent {
             | FrontendEvent::ToolCallFinished { .. }
             | FrontendEvent::RetryScheduled { .. }
             | FrontendEvent::Reminder { .. }
+            | FrontendEvent::TodoSnapshot { .. }
             | FrontendEvent::Error { .. }
             | FrontendEvent::SessionEnded { .. } => DeliveryMode::MustDeliver,
         }
@@ -88,19 +146,19 @@ pub enum EmitOutcome {
 
 #[derive(Debug, Default)]
 struct BestEffortBacklog {
-    assistant_delta: Option<String>,
-    thinking: Option<String>,
+    assistant_delta: Option<(u64, String)>,
+    thinking: Option<(u64, String)>,
     status: Option<String>,
 }
 
 impl BestEffortBacklog {
     fn push(&mut self, event: FrontendEvent) {
         match event {
-            FrontendEvent::AssistantMessageDelta { delta } => {
-                self.assistant_delta = Some(delta);
+            FrontendEvent::AssistantMessageDelta { turn_id, delta } => {
+                self.assistant_delta = Some((turn_id, delta));
             }
-            FrontendEvent::Thinking { text } => {
-                self.thinking = Some(text);
+            FrontendEvent::Thinking { turn_id, text } => {
+                self.thinking = Some((turn_id, text));
             }
             FrontendEvent::Status { message } => {
                 self.status = Some(message);
@@ -110,12 +168,12 @@ impl BestEffortBacklog {
     }
 
     fn pop_next(&mut self) -> Option<FrontendEvent> {
-        if let Some(delta) = self.assistant_delta.take() {
-            return Some(FrontendEvent::AssistantMessageDelta { delta });
+        if let Some((turn_id, delta)) = self.assistant_delta.take() {
+            return Some(FrontendEvent::AssistantMessageDelta { turn_id, delta });
         }
 
-        if let Some(text) = self.thinking.take() {
-            return Some(FrontendEvent::Thinking { text });
+        if let Some((turn_id, text)) = self.thinking.take() {
+            return Some(FrontendEvent::Thinking { turn_id, text });
         }
 
         self.status
@@ -161,9 +219,7 @@ impl FrontendEventSender {
                 self.backlog.lock().await.push(event);
                 Ok(EmitOutcome::Coalesced)
             }
-            Err(mpsc::error::TrySendError::Closed(event)) => {
-                Err(mpsc::error::SendError(event))
-            }
+            Err(mpsc::error::TrySendError::Closed(event)) => Err(mpsc::error::SendError(event)),
         }
     }
 
@@ -227,16 +283,34 @@ mod tests {
 
     #[test]
     fn command_and_event_types_are_constructible() {
-        let command = FrontendCommand::SubmitMessage("hello".to_string());
-        assert!(matches!(command, FrontendCommand::SubmitMessage(_)));
+        let command = FrontendCommand::Interrupt;
+        assert!(matches!(command, FrontendCommand::Interrupt));
 
-        let event = FrontendEvent::SessionEnded {
-            summary: FrontendSessionSummary {
-                turns: 3,
-                message_count: 7,
-            },
+        let started = FrontendEvent::ToolCallStarted {
+            turn_id: 7,
+            call_id: "tool-1".to_string(),
+            name: "read".to_string(),
+            args_preview: "README.md".to_string(),
         };
-        assert!(matches!(event, FrontendEvent::SessionEnded { .. }));
+        assert!(matches!(started, FrontendEvent::ToolCallStarted { .. }));
+
+        let finished = FrontendEvent::ToolCallFinished {
+            turn_id: 7,
+            call_id: "tool-1".to_string(),
+            name: "read".to_string(),
+            result_preview: "done".to_string(),
+        };
+        assert!(matches!(finished, FrontendEvent::ToolCallFinished { .. }));
+
+        let snapshot = FrontendEvent::TodoSnapshot {
+            turn_id: SESSION_START_TURN_ID,
+            items: vec![FrontendTodoItem {
+                id: 1,
+                text: "Ship protocol".to_string(),
+                status: FrontendTodoStatus::InProgress,
+            }],
+        };
+        assert!(matches!(snapshot, FrontendEvent::TodoSnapshot { .. }));
     }
 
     #[test]
@@ -248,11 +322,24 @@ mod tests {
             ["reed", "line"].concat(),
             ["std", "out"].concat(),
             ["std", "err"].concat(),
+            "crossterm".to_string(),
         ];
 
         for forbidden in forbidden_terms {
             assert!(!production_source.contains(&forbidden));
         }
+    }
+
+    #[test]
+    fn todo_snapshot_is_must_deliver() {
+        assert_eq!(
+            FrontendEvent::TodoSnapshot {
+                turn_id: SESSION_START_TURN_ID,
+                items: Vec::new(),
+            }
+            .delivery_mode(),
+            DeliveryMode::MustDeliver
+        );
     }
 
     #[tokio::test]
@@ -269,8 +356,9 @@ mod tests {
 
         let result = timeout(
             Duration::from_millis(50),
-            sender.emit(FrontendEvent::Status {
-                message: "busy".to_string(),
+            sender.emit(FrontendEvent::AssistantMessageDelta {
+                turn_id: 5,
+                delta: "busy".to_string(),
             }),
         )
         .await;
@@ -287,8 +375,9 @@ mod tests {
         let second = receiver.recv().await.expect("coalesced event should flush");
         assert_eq!(
             second,
-            FrontendEvent::Status {
-                message: "busy".to_string(),
+            FrontendEvent::AssistantMessageDelta {
+                turn_id: 5,
+                delta: "busy".to_string(),
             }
         );
     }
