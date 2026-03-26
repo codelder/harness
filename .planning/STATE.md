@@ -40,6 +40,7 @@ Plan: 3 of 3
 ### Roadmap Evolution
 
 - Phase 3.2 inserted after Phase 3.1: Replace reedline CLI UI with ratatui and add a unified frontend interface for CLI/Web/Desktop/Social channels (URGENT)
+- Phase 3.2.1 inserted after Phase 3.2: TUI Alignment with Claude Code — 使用 Viewport::Inline 替代 alternate screen，添加颜色系统、Spinner 动画、简化消息格式等 (URGENT)
 
 ### Decisions
 
