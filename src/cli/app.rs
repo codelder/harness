@@ -1,3 +1,4 @@
+use crate::cli::theme::CliTheme;
 use crate::frontend::{FrontendCommand, FrontendEvent, FrontendTodoItem, FrontendTodoStatus};
 use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 use ratatui::layout::{Constraint, Direction, Layout, Rect};
@@ -102,6 +103,7 @@ pub struct CliApp {
     streaming_assistant: Option<StreamingAssistant>,
     should_exit: bool,
     exit_requested: bool,
+    theme: CliTheme,
 }
 
 impl CliApp {
@@ -117,6 +119,7 @@ impl CliApp {
             streaming_assistant: None,
             should_exit: false,
             exit_requested: false,
+            theme: CliTheme::default(),
         }
     }
 
@@ -339,32 +342,33 @@ impl CliApp {
             .try_into()
             .expect("display layout");
 
-        let timeline_text = self.timeline_text();
-        let max_scroll = max_scroll_for_text(&timeline_text, timeline_area, 0);
+        let timeline_lines = self.timeline_lines();
+        let max_scroll = max_scroll_for_lines(&timeline_lines, timeline_area, 0);
         let scroll = self.viewport.resolve(max_scroll);
         let timeline_render_area = bottom_align_area(
             timeline_area,
-            visible_text_height(&timeline_text, timeline_area.width, 0),
+            visible_lines_height(&timeline_lines, timeline_area.width, 0),
         );
 
         let banner = Paragraph::new(APP_BANNER)
-            .style(Style::default().add_modifier(Modifier::BOLD));
+            .style(self.theme.banner);
         frame.render_widget(banner, banner_area);
 
-        let timeline = Paragraph::new(timeline_text)
+        let timeline = Paragraph::new(timeline_lines)
             .scroll((scroll, 0))
             .wrap(Wrap { trim: false });
         frame.render_widget(timeline, timeline_render_area);
 
         if footer_height > 0 {
             let footer = Paragraph::new(footer_text)
+                .style(self.theme.footer)
                 .block(Block::default().title("Todo").borders(Borders::TOP))
                 .wrap(Wrap { trim: false });
             frame.render_widget(footer, footer_area);
         }
 
         let composer = Paragraph::new(self.composer_text())
-            .style(Style::default().add_modifier(Modifier::BOLD))
+            .style(self.theme.composer)
             .block(Block::default().borders(Borders::TOP))
             .wrap(Wrap { trim: false });
         frame.render_widget(composer, composer_area);
@@ -408,22 +412,76 @@ impl CliApp {
         }
     }
 
-    fn timeline_text(&self) -> String {
-        let mut parts = self
-            .timeline
-            .iter()
-            .map(render_timeline_block)
-            .collect::<Vec<_>>();
+    fn timeline_lines(&self) -> Vec<Line<'static>> {
+        let mut lines = Vec::new();
 
+        for block in &self.timeline {
+            match block {
+                TimelineBlock::UserMessage { text, .. } => {
+                    lines.push(Line::styled(">>> You", self.theme.user));
+                    for line in text.lines() {
+                        lines.push(Line::styled(line.to_string(), self.theme.user));
+                    }
+                    lines.push(Line::raw("")); // blank line
+                }
+                TimelineBlock::AssistantMessage { text, .. } => {
+                    lines.push(Line::styled("<<< Assistant", self.theme.assistant));
+                    for line in text.lines() {
+                        lines.push(Line::styled(line.to_string(), self.theme.assistant));
+                    }
+                    lines.push(Line::raw(""));
+                }
+                TimelineBlock::Thinking { text, .. } => {
+                    lines.push(Line::styled("... Thinking", self.theme.thinking));
+                    for line in text.lines() {
+                        lines.push(Line::styled(line.to_string(), self.theme.thinking));
+                    }
+                    lines.push(Line::raw(""));
+                }
+                TimelineBlock::Note { kind, message, .. } => {
+                    let (prefix, style) = match kind {
+                        NoteKind::Error => ("!! Error", self.theme.error),
+                        NoteKind::Reminder => ("! Reminder", self.theme.status),
+                        NoteKind::Status => ("* Status", self.theme.status),
+                    };
+                    lines.push(Line::styled(prefix, style));
+                    for line in message.lines() {
+                        lines.push(Line::styled(line.to_string(), style));
+                    }
+                    lines.push(Line::raw(""));
+                }
+                TimelineBlock::Tool(tool) => {
+                    lines.push(Line::styled(format!("[{}]", tool.name), self.theme.tool));
+                    if !tool.args_preview.is_empty() {
+                        lines.push(Line::styled(
+                            format!("  {}", tool.args_preview),
+                            self.theme.tool,
+                        ));
+                    }
+                    if let Some(result) = &tool.result_preview {
+                        lines.push(Line::styled(
+                            format!("  -> {}", result),
+                            self.theme.tool_result,
+                        ));
+                    }
+                    lines.push(Line::raw(""));
+                }
+            }
+        }
+
+        // Handle streaming assistant
         if let Some(streaming) = &self.streaming_assistant {
-            parts.push(format!("Assistant [{}]\n{}", streaming.turn_id, streaming.text));
+            lines.push(Line::styled("<<< Assistant", self.theme.assistant));
+            for line in streaming.text.lines() {
+                lines.push(Line::styled(line.to_string(), self.theme.assistant));
+            }
         }
 
-        if parts.is_empty() {
-            "Start a conversation below.".to_string()
-        } else {
-            parts.join("\n\n")
+        if lines.is_empty() {
+            lines.push(Line::raw("Start a conversation below."));
         }
+
+        lines
     }
 
     fn todo_footer_text(&self) -> String {
@@ -453,45 +511,6 @@ impl Default for CliApp {
     }
 }
 
-fn render_timeline_block(block: &TimelineBlock) -> String {
-    match block {
-        TimelineBlock::UserMessage { turn_id, text } => format!("You [{}]\n{}", turn_id, text),
-        TimelineBlock::AssistantMessage { turn_id, text } => {
-            format!("Assistant [{}]\n{}", turn_id, text)
-        }
-        TimelineBlock::Thinking { turn_id, text } => {
-            format!("Thinking [{}]\n{}", turn_id, text)
-        }
-        TimelineBlock::Note {
-            turn_id,
-            kind,
-            message,
-        } => {
-            let label = match kind {
-                NoteKind::Reminder => "Reminder",
-                NoteKind::Error => "Error",
-                NoteKind::Status => "Status",
-            };
-            match turn_id {
-                Some(turn_id) => format!("{} [{}]\n{}", label, turn_id, message),
-                None => format!("{}\n{}", label, message),
-            }
-        }
-        TimelineBlock::Tool(tool) => {
-            let mut lines = vec![format!(
-                "Tool [{}:{}] {}",
-                tool.turn_id, tool.call_id, tool.name
-            )];
-            if !tool.args_preview.is_empty() {
-                lines.push(format!("args: {}", tool.args_preview));
-            }
-            if let Some(result_preview) = &tool.result_preview {
-                lines.push(format!("result: {}", result_preview));
-            }
-            lines.join("\n")
-        }
-    }
-}
 
 fn todo_marker(status: FrontendTodoStatus) -> &'static str {
     match status {
@@ -518,21 +537,26 @@ fn footer_height(text: &str, area: Rect) -> u16 {
     if text.is_empty() {
         0
     } else {
-        visible_text_height(text, area.width, 2)
+        // Use visible_lines_height with converted lines for footer
+        let footer_lines: Vec<Line<'static>> = text.lines().map(Line::raw).collect();
+        visible_lines_height(&footer_lines, area.width, 2)
     }
 }
 
-fn max_scroll_for_text(text: &str, area: Rect, vertical_chrome: u16) -> u16 {
+fn max_scroll_for_lines(lines: &[Line], area: Rect, vertical_chrome: u16) -> u16 {
     let visible_height = area.height.saturating_sub(vertical_chrome);
     if visible_height == 0 {
         return 0;
     }
 
-    wrapped_line_count(text, area.width).saturating_sub(visible_height)
+    let line_count = lines.len() as u16;
+    line_count.saturating_sub(visible_height)
 }
 
-fn visible_text_height(text: &str, width: u16, vertical_chrome: u16) -> u16 {
-    wrapped_line_count(text, width.saturating_sub(0)).saturating_add(vertical_chrome)
+fn visible_lines_height(lines: &[Line], width: u16, vertical_chrome: u16) -> u16 {
+    // Estimate line count based on content width
+    let line_count = lines.len() as u16;
+    line_count.saturating_add(vertical_chrome)
 }
 
 fn wrapped_line_count(text: &str, width: u16) -> u16 {
