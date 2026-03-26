@@ -2,14 +2,14 @@
 gsd_state_version: 1.0
 milestone: v0.4
 milestone_name: Subagents
-status: Phase complete — ready for verification
+status: Executing Phase 03.2.1
 stopped_at: Completed 03.2-03-PLAN.md
-last_updated: "2026-03-26T03:44:38.342Z"
+last_updated: "2026-03-26T08:08:19.480Z"
 last_activity: 2026-03-26
 progress:
-  total_phases: 2
+  total_phases: 3
   completed_phases: 1
-  total_plans: 3
+  total_plans: 10
   completed_plans: 3
 ---
 
@@ -20,7 +20,7 @@ progress:
 See: .planning/PROJECT.md (updated 2026-03-24)
 
 **Core value:** Performance and safety without sacrificing capability
-**Current focus:** Phase 03.2 — terminal-ui-and-frontend-interface-abstraction
+**Current focus:** Phase 03.2.1 — tui-alignment-with-claude-code
 
 ## Milestone History
 
@@ -32,14 +32,15 @@ See: .planning/PROJECT.md (updated 2026-03-24)
 
 ## Current Position
 
-Phase: 03.2 (terminal-ui-and-frontend-interface-abstraction) — EXECUTING
-Plan: 3 of 3
+Phase: 03.2.1 (tui-alignment-with-claude-code) — EXECUTING
+Plan: 1 of 6
 
 ## Accumulated Context
 
 ### Roadmap Evolution
 
 - Phase 3.2 inserted after Phase 3.1: Replace reedline CLI UI with ratatui and add a unified frontend interface for CLI/Web/Desktop/Social channels (URGENT)
+- Phase 3.2.1 inserted after Phase 3.2: TUI Alignment with Claude Code — 使用 Viewport::Inline 替代 alternate screen，添加颜色系统、Spinner 动画、简化消息格式等 (URGENT)
 
 ### Decisions
 

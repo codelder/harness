@@ -48,6 +48,7 @@ See: [v0.3-ROADMAP.md](milestones/v0.3-ROADMAP.md)
 ### ⚡ Inserted Work (Planned)
 
 - [ ] **Phase 3.2: Terminal UI and Frontend Interface Abstraction (INSERTED)** — Replace the split-pane ratatui workbench with a single-column Claude Code-like terminal UI and repair the shared frontend protocol for future adapters
+- [ ] **Phase 3.2.1: TUI Alignment with Claude Code (INSERTED)** — 将 TUI 体验与 Claude Code CLI 全面对齐：Viewport::Inline、颜色系统、Spinner 动画、简化消息格式、增强 Banner/Todo/Statusline
 
 ### 📋 v0.4 Subagents (Planned)
 
@@ -79,6 +80,32 @@ Plans:
 - [x] 3.2-01-PLAN.md — Repair the frontend protocol for turn identity, tool correlation, and todo snapshots
 - [x] 3.2-02-PLAN.md — Wire the headless runtime and PromptHook path to emit correlated unified-timeline events
 - [ ] 3.2-03-PLAN.md — Rebuild the ratatui CLI as a single-column timeline with overflow and lifecycle regression coverage
+
+### Phase 3.2.1: TUI Alignment with Claude Code (INSERTED)
+
+**Goal:** 将 TUI 体验与 Claude Code CLI 全面对齐 — 使用 Viewport::Inline 替代 alternate screen，添加颜色系统、Spinner 动画、简化消息格式、增强 Banner/Todo/Statusline
+**Requirements**: REQ-3.2.1-01 ~ REQ-3.2.1-07
+**Depends on:** Phase 3.2
+**Success Criteria** (what must be TRUE):
+
+  1. 使用 Viewport::Inline 模式，退出后对话历史保留在终端 scrollback
+  2. 完整的语义化颜色系统，不同消息类型有不同颜色
+  3. ASCII 花朵 Spinner 动画 + 趣味状态文本
+  4. 简化的消息格式（去掉冗长的 [turn_id]）
+  5. 多行 Banner 信息面板（版本/模型/路径）
+  6. Todo 完成时自动收起 + 写入历史
+  7. Statusline 显示 token 上下文
+
+**Plans:** 7 plans (0/7 complete)
+
+Plans:
+- [ ] 3.2.1-01-PLAN.md — 切换到 Inline Viewport 模式
+- [ ] 3.2.1-02-PLAN.md — 添加颜色系统和主题
+- [ ] 3.2.1-03-PLAN.md — Spinner 动画和趣味状态
+- [ ] 3.2.1-04-PLAN.md — 简化消息格式
+- [ ] 3.2.1-05-PLAN.md — 增强 Banner 信息面板
+- [ ] 3.2.1-06-PLAN.md — 增强 Todo 显示（自动收起+写入历史）
+- [ ] 3.2.1-07-PLAN.md — 增强 Statusline（token 上下文）
 
 ### Phase 4: s04 - Subagents
 

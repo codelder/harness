@@ -1,12 +1,7 @@
-use crossterm::event::{
-    self, DisableMouseCapture, EnableMouseCapture, Event, KeyEvent, KeyEventKind,
-};
-use crossterm::execute;
-use crossterm::terminal::{
-    disable_raw_mode, enable_raw_mode, EnterAlternateScreen, LeaveAlternateScreen,
-};
+use crossterm::event::{self, Event, KeyEvent, KeyEventKind};
+use crossterm::terminal::{disable_raw_mode, enable_raw_mode};
 use ratatui::backend::CrosstermBackend;
-use ratatui::{Frame, Terminal};
+use ratatui::{Frame, Terminal, TerminalOptions, Viewport};
 use std::io::{self, Stdout};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
@@ -16,11 +11,22 @@ use tokio::task::JoinHandle;
 
 pub type CliTerminal = Terminal<CrosstermBackend<Stdout>>;
 
-/// Centralized terminal lifecycle guard for raw mode and alternate screen ownership.
+/// Minimum inline viewport height to ensure usable display.
+const MIN_INLINE_HEIGHT: u16 = 10;
+/// Reserve lines for status/composer margins.
+const MARGIN_LINES: u16 = 2;
+
+/// Calculate inline viewport height from terminal size.
+/// Returns at least MIN_INLINE_HEIGHT to ensure usable display.
+pub fn calculate_inline_height(terminal_height: u16) -> u16 {
+    terminal_height.saturating_sub(MARGIN_LINES).max(MIN_INLINE_HEIGHT)
+}
+
+/// Centralized terminal lifecycle guard for raw mode and inline viewport ownership.
 pub struct TerminalGuard {
     terminal: Option<CliTerminal>,
     raw_mode_enabled: bool,
-    alternate_screen_active: bool,
+    inline_height: u16,
 }
 
 impl TerminalGuard {
@@ -32,7 +38,7 @@ impl TerminalGuard {
         Ok(Self {
             terminal: Some(terminal),
             raw_mode_enabled: state.raw_mode_enabled,
-            alternate_screen_active: state.alternate_screen_active,
+            inline_height: state.inline_height,
         })
     }
 
@@ -46,17 +52,38 @@ impl TerminalGuard {
         Ok(())
     }
 
+    /// Handle terminal resize by recalculating inline height.
+    /// Returns true if viewport height changed.
+    pub fn handle_resize(&mut self) -> io::Result<bool> {
+        if let Some(terminal) = &mut self.terminal {
+            let size = terminal.size()?;
+            let new_height = calculate_inline_height(size.height);
+            if new_height != self.inline_height {
+                self.inline_height = new_height;
+                // Reconfigure viewport with new height
+                terminal.resize(ratatui::layout::Rect::new(
+                    0,
+                    0,
+                    size.width,
+                    new_height,
+                ))?;
+                return Ok(true);
+            }
+        }
+        Ok(false)
+    }
+
     pub fn restore(&mut self) -> io::Result<()> {
         let mut ops = SystemLifecycleOps;
         let mut terminal = self.terminal.take();
         let mut state = LifecycleState {
             raw_mode_enabled: self.raw_mode_enabled,
-            alternate_screen_active: self.alternate_screen_active,
+            inline_height: self.inline_height,
         };
         let result = restore_terminal(&mut ops, terminal.as_mut(), &mut state);
 
         self.raw_mode_enabled = state.raw_mode_enabled;
-        self.alternate_screen_active = state.alternate_screen_active;
+        self.inline_height = state.inline_height;
 
         result
     }
@@ -69,18 +96,31 @@ impl Drop for TerminalGuard {
 }
 
 /// Dedicated blocking input task that feeds crossterm key events into the async UI loop.
+/// Also passes through resize events for viewport reconfiguration.
 pub fn spawn_input_listener(
     stop_flag: Arc<AtomicBool>,
-) -> (JoinHandle<Result<(), String>>, mpsc::UnboundedReceiver<KeyEvent>) {
+) -> (
+    JoinHandle<Result<(), String>>,
+    mpsc::UnboundedReceiver<InputEvent>,
+) {
     let (tx, rx) = mpsc::unbounded_channel();
 
     let handle = tokio::task::spawn_blocking(move || -> Result<(), String> {
         while !stop_flag.load(Ordering::SeqCst) {
             if event::poll(Duration::from_millis(50)).map_err(|error| error.to_string())? {
-                if let Event::Key(key) = event::read().map_err(|error| error.to_string())? {
-                    if key.kind == KeyEventKind::Press && tx.send(key).is_err() {
-                        break;
+                match event::read().map_err(|error| error.to_string())? {
+                    Event::Key(key) => {
+                        if key.kind == KeyEventKind::Press && tx.send(InputEvent::Key(key)).is_err()
+                        {
+                            break;
+                        }
                     }
+                    Event::Resize(columns, rows) => {
+                        if tx.send(InputEvent::Resize(columns, rows)).is_err() {
+                            break;
+                        }
+                    }
+                    _ => {}
                 }
             }
         }
@@ -90,10 +130,17 @@ pub fn spawn_input_listener(
     (handle, rx)
 }
 
+/// Input events from the terminal.
+#[derive(Debug, Clone)]
+pub enum InputEvent {
+    Key(KeyEvent),
+    Resize(u16, u16),
+}
+
 #[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
 struct LifecycleState {
     raw_mode_enabled: bool,
-    alternate_screen_active: bool,
+    inline_height: u16,
 }
 
 trait TerminalLifecycleOps {
@@ -101,9 +148,8 @@ trait TerminalLifecycleOps {
 
     fn enable_raw_mode(&mut self) -> io::Result<()>;
     fn disable_raw_mode(&mut self) -> io::Result<()>;
-    fn enter_alternate_screen(&mut self) -> io::Result<()>;
-    fn leave_alternate_screen(&mut self, terminal: Option<&mut Self::Terminal>) -> io::Result<()>;
-    fn create_terminal(&mut self) -> io::Result<Self::Terminal>;
+    fn get_terminal_height(&self) -> io::Result<u16>;
+    fn create_inline_terminal(&mut self, height: u16) -> io::Result<Self::Terminal>;
     fn show_cursor(&mut self, terminal: &mut Self::Terminal) -> io::Result<()>;
 }
 
@@ -120,31 +166,16 @@ impl TerminalLifecycleOps for SystemLifecycleOps {
         disable_raw_mode()
     }
 
-    fn enter_alternate_screen(&mut self) -> io::Result<()> {
-        let mut stdout = io::stdout();
-        execute!(stdout, EnterAlternateScreen, EnableMouseCapture)
+    fn get_terminal_height(&self) -> io::Result<u16> {
+        let size = crossterm::terminal::size()?;
+        Ok(size.1)
     }
 
-    fn leave_alternate_screen(
-        &mut self,
-        terminal: Option<&mut Self::Terminal>,
-    ) -> io::Result<()> {
-        match terminal {
-            Some(terminal) => execute!(
-                terminal.backend_mut(),
-                LeaveAlternateScreen,
-                DisableMouseCapture
-            ),
-            None => {
-                let mut stdout = io::stdout();
-                execute!(stdout, LeaveAlternateScreen, DisableMouseCapture)
-            }
-        }
-    }
-
-    fn create_terminal(&mut self) -> io::Result<Self::Terminal> {
+    fn create_inline_terminal(&mut self, height: u16) -> io::Result<Self::Terminal> {
         let backend = CrosstermBackend::new(io::stdout());
-        Terminal::new(backend)
+        Terminal::with_options(backend, TerminalOptions {
+            viewport: Viewport::Inline(height),
+        })
     }
 
     fn show_cursor(&mut self, terminal: &mut Self::Terminal) -> io::Result<()> {
@@ -159,13 +190,11 @@ fn initialize_terminal<Ops: TerminalLifecycleOps>(
     ops.enable_raw_mode()?;
     state.raw_mode_enabled = true;
 
-    if let Err(error) = ops.enter_alternate_screen() {
-        let _ = rollback_terminal_setup(ops, state);
-        return Err(error);
-    }
-    state.alternate_screen_active = true;
+    // Calculate initial inline height
+    let height = calculate_inline_height(ops.get_terminal_height()?);
+    state.inline_height = height;
 
-    match ops.create_terminal() {
+    match ops.create_inline_terminal(height) {
         Ok(terminal) => Ok(terminal),
         Err(error) => {
             let _ = rollback_terminal_setup(ops, state);
@@ -192,15 +221,13 @@ fn restore_terminal<Ops: TerminalLifecycleOps>(
         capture_cleanup_error(ops.show_cursor(active_terminal), &mut first_error);
     }
 
-    if state.alternate_screen_active {
-        capture_cleanup_error(ops.leave_alternate_screen(terminal), &mut first_error);
-        state.alternate_screen_active = false;
-    }
-
     if state.raw_mode_enabled {
         capture_cleanup_error(ops.disable_raw_mode(), &mut first_error);
         state.raw_mode_enabled = false;
     }
+
+    // Reset inline_height on cleanup
+    state.inline_height = 0;
 
     if let Some(error) = first_error {
         Err(error)
@@ -237,11 +264,16 @@ pub(crate) mod tests {
     struct MockLifecycleOps {
         log: Arc<Mutex<Vec<&'static str>>>,
         fail_step: Option<&'static str>,
+        terminal_height: u16,
     }
 
     impl MockLifecycleOps {
         fn new(log: Arc<Mutex<Vec<&'static str>>>, fail_step: Option<&'static str>) -> Self {
-            Self { log, fail_step }
+            Self {
+                log,
+                fail_step,
+                terminal_height: 24, // Default terminal height for tests
+            }
         }
 
         fn push(&self, step: &'static str) {
@@ -269,19 +301,19 @@ pub(crate) mod tests {
             self.maybe_fail("disable_raw_mode")
         }
 
-        fn enter_alternate_screen(&mut self) -> io::Result<()> {
-            self.maybe_fail("enter_alternate_screen")
+        fn get_terminal_height(&self) -> io::Result<u16> {
+            Ok(self.terminal_height)
         }
 
-        fn leave_alternate_screen(
-            &mut self,
-            _terminal: Option<&mut Self::Terminal>,
-        ) -> io::Result<()> {
-            self.maybe_fail("leave_alternate_screen")
-        }
-
-        fn create_terminal(&mut self) -> io::Result<Self::Terminal> {
-            self.maybe_fail("create_terminal")?;
+        fn create_inline_terminal(&mut self, height: u16) -> io::Result<Self::Terminal> {
+            self.push("create_inline_terminal");
+            // Check if we should fail BEFORE pushing height (to match test expectations)
+            if self.fail_step == Some("create_inline_terminal") {
+                return Err(io::Error::other("mock create_inline_terminal failure"));
+            }
+            // Use Box::leak to get 'static lifetime for the formatted string
+            let height_str = Box::leak(format!("height_{}", height).into_boxed_str());
+            self.push(height_str);
             Ok(MockTerminal)
         }
 
@@ -327,48 +359,26 @@ pub(crate) mod tests {
         let mut guard = TerminalGuard {
             terminal: None,
             raw_mode_enabled: false,
-            alternate_screen_active: false,
+            inline_height: 0,
         };
         assert!(guard.restore().is_ok());
         assert!(guard.restore().is_ok());
     }
 
     #[test]
-    fn constructor_rollback_restores_raw_mode_if_screen_entry_fails() {
+    fn constructor_rollback_restores_raw_mode_if_terminal_creation_fails() {
         let log = Arc::new(Mutex::new(Vec::new()));
-        let mut ops = MockLifecycleOps::new(log.clone(), Some("enter_alternate_screen"));
+        let mut ops = MockLifecycleOps::new(log.clone(), Some("create_inline_terminal"));
         let mut state = LifecycleState::default();
 
         let error = initialize_terminal(&mut ops, &mut state).expect_err("init should fail");
 
-        assert!(error.to_string().contains("enter_alternate_screen"));
+        assert!(error.to_string().contains("create_inline_terminal"));
         assert_eq!(
             log.lock().expect("log should lock").clone(),
             vec![
                 "enable_raw_mode",
-                "enter_alternate_screen",
-                "disable_raw_mode",
-            ]
-        );
-        assert_eq!(state, LifecycleState::default());
-    }
-
-    #[test]
-    fn constructor_rollback_restores_screen_if_terminal_creation_fails() {
-        let log = Arc::new(Mutex::new(Vec::new()));
-        let mut ops = MockLifecycleOps::new(log.clone(), Some("create_terminal"));
-        let mut state = LifecycleState::default();
-
-        let error = initialize_terminal(&mut ops, &mut state).expect_err("init should fail");
-
-        assert!(error.to_string().contains("create_terminal"));
-        assert_eq!(
-            log.lock().expect("log should lock").clone(),
-            vec![
-                "enable_raw_mode",
-                "enter_alternate_screen",
-                "create_terminal",
-                "leave_alternate_screen",
+                "create_inline_terminal",
                 "disable_raw_mode",
             ]
         );
@@ -400,12 +410,18 @@ pub(crate) mod tests {
             log.lock().expect("log should lock").clone(),
             vec![
                 "enable_raw_mode",
-                "enter_alternate_screen",
-                "create_terminal",
+                "create_inline_terminal",
+                "height_22", // 24 - 2 margins = 22
                 "show_cursor",
-                "leave_alternate_screen",
                 "disable_raw_mode",
             ]
         );
+    }
+
+    #[test]
+    fn calculate_inline_height_respects_minimum() {
+        assert_eq!(calculate_inline_height(5), 10); // Below minimum
+        assert_eq!(calculate_inline_height(20), 18); // Normal case (20 - 2 margins)
+        assert_eq!(calculate_inline_height(100), 98); // Large terminal
     }
 }
