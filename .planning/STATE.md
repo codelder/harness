@@ -2,14 +2,14 @@
 gsd_state_version: 1.0
 milestone: v0.4
 milestone_name: Subagents
-status: Ready for verification
-last_updated: "2026-03-25T01:41:11.679Z"
-last_activity: 2026-03-25
+status: Executing Phase 03.2
+last_updated: "2026-03-26T03:08:48.994Z"
+last_activity: 2026-03-26
 progress:
   total_phases: 2
-  completed_phases: 1
-  total_plans: 4
-  completed_plans: 4
+  completed_phases: 0
+  total_plans: 3
+  completed_plans: 1
 ---
 
 # Project State
@@ -31,8 +31,8 @@ See: .planning/PROJECT.md (updated 2026-03-24)
 
 ## Current Position
 
-Phase: 03.2 (terminal-ui-and-frontend-interface-abstraction) — READY FOR VERIFICATION
-Plans: 4 of 4 completed
+Phase: 03.2 (terminal-ui-and-frontend-interface-abstraction) — EXECUTING
+Plan: 2 of 3
 
 ## Accumulated Context
 
@@ -52,6 +52,9 @@ Decisions are logged in PROJECT.md Key Decisions table.
 - [Phase 03.2]: Centralize raw-mode and alternate-screen ownership in TerminalGuard with a dedicated crossterm input listener task. — This keeps terminal lifecycle restoration explicit and limits terminal side effects to one module instead of scattering them across main/session code.
 - [Phase 03.2]: Favor protocol and lifecycle integration tests over brittle TUI snapshot assertions. — The frontend contract is the stable architectural boundary; testing it directly gives better regression coverage while allowing the visual layout to evolve.
 - [Phase 03.2]: Use a non-interactive harness --help smoke path for startup verification. — This verifies the binary still boots through the migrated CLI stack without requiring a live model call or interactive terminal session in CI.
+- [Phase 03.2]: Keep SESSION_START_TURN_ID as the explicit reserved identity for session-start todo snapshots and default hook construction.
+- [Phase 03.2]: Keep ToolCallFinished.name alongside turn_id and call_id so reducers never need a side lookup to label tool results.
+- [Phase 03.2]: Represent todo footer state as TodoSnapshot emitted from the runtime instead of parsing reminder text.
 
 ### Pending Todos
 
@@ -63,4 +66,4 @@ None.
 
 ## Session Continuity
 
-Last activity: 2026-03-25
+Last activity: 2026-03-26
