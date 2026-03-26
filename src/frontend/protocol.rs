@@ -7,6 +7,9 @@ pub const DEFAULT_FRONTEND_CHANNEL_CAPACITY: usize = 64;
 /// Reserved turn id for session-start snapshots and pre-turn metadata.
 pub const SESSION_START_TURN_ID: u64 = 0;
 
+/// Current harness version
+pub const HARNESS_VERSION: &str = env!("CARGO_PKG_VERSION");
+
 /// Typed commands sent from an adapter to the shared runtime.
 pub type FrontendCommandSender = mpsc::Sender<FrontendCommand>;
 pub type FrontendCommandReceiver = mpsc::Receiver<FrontendCommand>;
@@ -63,6 +66,7 @@ pub enum FrontendEvent {
         provider: String,
         model: String,
         working_directory: String,
+        version: String,
     },
     UserMessageCommitted {
         turn_id: u64,
@@ -352,6 +356,7 @@ mod tests {
                 provider: "anthropic".to_string(),
                 model: "claude".to_string(),
                 working_directory: "/test".to_string(),
+                version: "0.1.0".to_string(),
             })
             .await
             .expect("must-deliver event should fit");
