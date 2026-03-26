@@ -35,13 +35,14 @@ async fn session_start_and_exit_emit_metadata_events() {
             message_count: 1,
         })
     );
-    assert_eq!(
+    assert!(matches!(
         event_rx.recv().await,
         Some(FrontendEvent::SessionStarted {
-            provider: "ollama".to_string(),
-            model: "test-model".to_string(),
-        })
-    );
+            provider,
+            model,
+            working_directory,
+        }) if provider == "ollama" && model == "test-model"
+    ));
     let mut saw_session_end = false;
     while let Some(event) = event_rx.recv().await {
         if let FrontendEvent::SessionEnded {

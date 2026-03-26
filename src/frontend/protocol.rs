@@ -62,6 +62,7 @@ pub enum FrontendEvent {
     SessionStarted {
         provider: String,
         model: String,
+        working_directory: String,
     },
     UserMessageCommitted {
         turn_id: u64,
@@ -350,6 +351,7 @@ mod tests {
             .emit(FrontendEvent::SessionStarted {
                 provider: "anthropic".to_string(),
                 model: "claude".to_string(),
+                working_directory: "/test".to_string(),
             })
             .await
             .expect("must-deliver event should fit");

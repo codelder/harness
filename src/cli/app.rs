@@ -98,6 +98,7 @@ pub struct CliApp {
     status: String,
     provider: Option<String>,
     model: Option<String>,
+    working_directory: Option<String>,
     viewport: ViewportState,
     streaming_assistant: Option<StreamingAssistant>,
     should_exit: bool,
@@ -115,6 +116,7 @@ impl CliApp {
             status: "Starting session...".to_string(),
             provider: None,
             model: None,
+            working_directory: None,
             viewport: ViewportState::new(),
             streaming_assistant: None,
             should_exit: false,
@@ -126,9 +128,10 @@ impl CliApp {
 
     pub fn apply_event(&mut self, event: FrontendEvent) {
         match event {
-            FrontendEvent::SessionStarted { provider, model } => {
+            FrontendEvent::SessionStarted { provider, model, working_directory } => {
                 self.provider = Some(provider);
                 self.model = Some(model);
+                self.working_directory = Some(working_directory);
                 self.status = self.connection_label();
             }
             FrontendEvent::UserMessageCommitted { turn_id, text } => {

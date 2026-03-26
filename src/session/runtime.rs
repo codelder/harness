@@ -132,11 +132,15 @@ impl SessionRuntime {
         event_tx: &FrontendEventSender,
     ) -> Result<(), AgentError> {
         self.provider = Some(provider);
+        let working_directory = std::env::current_dir()
+            .map(|p| p.to_string_lossy().to_string())
+            .unwrap_or_else(|_| ".".to_string());
         self.emit_event(
             event_tx,
             FrontendEvent::SessionStarted {
                 provider: provider_name.into(),
                 model: model.into(),
+                working_directory,
             },
         )
         .await?;
@@ -609,13 +613,14 @@ mod tests {
             .await
             .unwrap();
 
-        assert_eq!(
+        assert!(matches!(
             event_rx.recv().await,
             Some(FrontendEvent::SessionStarted {
-                provider: "test".to_string(),
-                model: "model".to_string(),
-            })
-        );
+                provider,
+                model,
+                working_directory: _,
+            }) if provider == "test" && model == "model"
+        ));
         assert_eq!(
             event_rx.recv().await,
             Some(FrontendEvent::TodoSnapshot {

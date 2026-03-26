@@ -299,6 +299,7 @@ mod tests {
             .emit(FrontendEvent::SessionStarted {
                 provider: "ollama".to_string(),
                 model: "test-model".to_string(),
+                working_directory: "/test".to_string(),
             })
             .await
             .expect("session started should fit");
