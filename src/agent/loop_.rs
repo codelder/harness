@@ -1,9 +1,9 @@
 use super::{AgentTurn, Message, Role};
 use crate::error::{classify_prompt_error, AgentError};
-use crate::frontend::{FrontendEvent, FrontendEventSender};
+use crate::frontend::{FrontendEvent, FrontendEventSender, SESSION_START_TURN_ID};
+use rig::agent::{PromptHook, ToolCallHookAction, HookAction};
 use rig::completion::{AssistantContent, CompletionModel};
 use rig::message::ReasoningContent;
-use rig::agent::{PromptHook, ToolCallHookAction, HookAction};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 use std::time::Duration;
@@ -26,6 +26,8 @@ const INITIAL_DELAY: Duration = Duration::from_secs(1);
 pub struct TodoUsageHook {
     /// Flag set to true when todo tool is called
     used_todo: Arc<AtomicBool>,
+    /// Turn context for every emitted event during the active provider call.
+    turn_id: u64,
     /// Optional side channel for structured runtime/frontend events.
     event_tx: Option<FrontendEventSender>,
 }
@@ -35,20 +37,28 @@ impl TodoUsageHook {
     ///
     /// Returns the hook and a clone of the flag that can be checked
     /// after agent execution completes.
-    pub fn new(event_tx: Option<FrontendEventSender>) -> (Self, Arc<AtomicBool>) {
+    pub fn new(turn_id: u64, event_tx: Option<FrontendEventSender>) -> (Self, Arc<AtomicBool>) {
         let used_todo = Arc::new(AtomicBool::new(false));
         let hook = Self {
             used_todo: used_todo.clone(),
+            turn_id,
             event_tx,
         };
         (hook, used_todo)
     }
 
-    async fn record_tool_call(&self, tool_name: &str, args: &str) {
+    async fn record_tool_call(
+        &self,
+        tool_name: &str,
+        tool_call_id: Option<String>,
+        internal_call_id: &str,
+        args: &str,
+    ) {
         if tool_name == "todo" {
             self.used_todo.store(true, Ordering::SeqCst);
         }
 
+        let call_id = tool_call_id.unwrap_or_else(|| internal_call_id.to_string());
         let args_preview = if args.len() > 100 {
             format!("{}...", &args[..100])
         } else {
@@ -56,16 +66,25 @@ impl TodoUsageHook {
         };
 
         self.emit_event(FrontendEvent::ToolCallStarted {
+            turn_id: self.turn_id,
+            call_id,
             name: tool_name.to_string(),
             args_preview,
         })
         .await;
     }
 
-    async fn record_tool_result(&self, tool_name: &str, result: &str) {
+    async fn record_tool_result(
+        &self,
+        tool_name: &str,
+        tool_call_id: Option<String>,
+        internal_call_id: &str,
+        result: &str,
+    ) {
         let decoded_result =
             serde_json::from_str::<String>(result).unwrap_or_else(|_| result.to_string());
 
+        let call_id = tool_call_id.unwrap_or_else(|| internal_call_id.to_string());
         let result_preview = if decoded_result.len() > 200 {
             format!("{}...", &decoded_result[..200])
         } else if decoded_result.is_empty() {
@@ -75,6 +94,8 @@ impl TodoUsageHook {
         };
 
         self.emit_event(FrontendEvent::ToolCallFinished {
+            turn_id: self.turn_id,
+            call_id,
             name: tool_name.to_string(),
             result_preview,
         })
@@ -87,6 +108,7 @@ impl TodoUsageHook {
         }
 
         self.emit_event(FrontendEvent::Thinking {
+            turn_id: self.turn_id,
             text: thinking_text,
         })
         .await;
@@ -98,6 +120,7 @@ impl TodoUsageHook {
         }
 
         self.emit_event(FrontendEvent::AssistantMessageDelta {
+            turn_id: self.turn_id,
             delta: text_delta.to_string(),
         })
         .await;
@@ -111,6 +134,7 @@ impl TodoUsageHook {
         reason: String,
     ) {
         self.emit_event(FrontendEvent::RetryScheduled {
+            turn_id: self.turn_id,
             attempt,
             max_retries,
             delay_ms: delay.as_millis() as u64,
@@ -128,7 +152,7 @@ impl TodoUsageHook {
 
 impl Default for TodoUsageHook {
     fn default() -> Self {
-        Self::new(None).0
+        Self::new(SESSION_START_TURN_ID, None).0
     }
 }
 
@@ -140,11 +164,12 @@ where
     async fn on_tool_call(
         &self,
         tool_name: &str,
-        _tool_call_id: Option<String>,
-        _internal_call_id: &str,
+        tool_call_id: Option<String>,
+        internal_call_id: &str,
         args: &str,
     ) -> ToolCallHookAction {
-        self.record_tool_call(tool_name, args).await;
+        self.record_tool_call(tool_name, tool_call_id, internal_call_id, args)
+            .await;
         ToolCallHookAction::cont()
     }
 
@@ -152,12 +177,13 @@ where
     async fn on_tool_result(
         &self,
         tool_name: &str,
-        _tool_call_id: Option<String>,
-        _internal_call_id: &str,
+        tool_call_id: Option<String>,
+        internal_call_id: &str,
         _args: &str,
         result: &str,
     ) -> HookAction {
-        self.record_tool_result(tool_name, result).await;
+        self.record_tool_result(tool_name, tool_call_id, internal_call_id, result)
+            .await;
         HookAction::cont()
     }
 
@@ -324,7 +350,7 @@ pub async fn agent_loop(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::frontend::{frontend_event_channel, FrontendEvent};
+    use crate::frontend::{frontend_event_channel, FrontendEvent, SESSION_START_TURN_ID};
     use std::sync::atomic::{AtomicU32, Ordering};
     use std::sync::Arc;
 
@@ -453,10 +479,17 @@ mod tests {
     #[tokio::test]
     async fn test_hook_emits_tool_and_retry_events() {
         let (event_tx, mut event_rx) = frontend_event_channel(8);
-        let (hook, used_todo) = TodoUsageHook::new(Some(event_tx));
+        let (hook, used_todo) = TodoUsageHook::new(7, Some(event_tx));
 
-        hook.record_tool_call("todo", "{\"items\":[]}").await;
-        hook.record_tool_result("todo", "\"updated\"").await;
+        hook.record_tool_call(
+            "todo",
+            Some("tool-call".to_string()),
+            "internal-1",
+            "{\"items\":[]}",
+        )
+        .await;
+        hook.record_tool_result("todo", Some("tool-call".to_string()), "internal-1", "\"updated\"")
+            .await;
         hook.emit_retry_scheduled(
             1,
             3,
@@ -469,6 +502,8 @@ mod tests {
         assert_eq!(
             event_rx.recv().await,
             Some(FrontendEvent::ToolCallStarted {
+                turn_id: 7,
+                call_id: "tool-call".to_string(),
                 name: "todo".to_string(),
                 args_preview: "{\"items\":[]}".to_string(),
             })
@@ -476,6 +511,8 @@ mod tests {
         assert_eq!(
             event_rx.recv().await,
             Some(FrontendEvent::ToolCallFinished {
+                turn_id: 7,
+                call_id: "tool-call".to_string(),
                 name: "todo".to_string(),
                 result_preview: "updated".to_string(),
             })
@@ -483,11 +520,18 @@ mod tests {
         assert_eq!(
             event_rx.recv().await,
             Some(FrontendEvent::RetryScheduled {
+                turn_id: 7,
                 attempt: 1,
                 max_retries: 3,
                 delay_ms: 250,
                 reason: "temporary network issue".to_string(),
             })
         );
+    }
+
+    #[test]
+    fn default_hook_uses_session_start_turn_id() {
+        let hook = TodoUsageHook::default();
+        assert_eq!(hook.turn_id, SESSION_START_TURN_ID);
     }
 }

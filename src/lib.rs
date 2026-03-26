@@ -22,6 +22,9 @@ pub use frontend::{
     FrontendEventReceiver,
     FrontendEventSender,
     FrontendSessionSummary,
+    FrontendTodoItem,
+    FrontendTodoStatus,
+    SESSION_START_TURN_ID,
     send_frontend_command,
 };
 pub use session::{SessionRuntime, SessionRuntimeConfig, SessionRuntimeOutcome, SessionSummary};

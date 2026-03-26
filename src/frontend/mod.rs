@@ -13,4 +13,7 @@ pub use protocol::{
     FrontendEventReceiver,
     FrontendEventSender,
     FrontendSessionSummary,
+    FrontendTodoItem,
+    FrontendTodoStatus,
+    SESSION_START_TURN_ID,
 };

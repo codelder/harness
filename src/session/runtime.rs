@@ -1,8 +1,11 @@
 use crate::agent::{agent_loop, AgentTurn, Message, TodoUsageHook};
 use crate::error::{AgentError, ProviderError};
-use crate::frontend::{FrontendCommand, FrontendEvent, FrontendEventSender, FrontendSessionSummary};
+use crate::frontend::{
+    FrontendCommand, FrontendEvent, FrontendEventSender, FrontendSessionSummary,
+    FrontendTodoItem, FrontendTodoStatus, SESSION_START_TURN_ID,
+};
 use crate::llm::{create_provider, LlmProvider, ProviderType};
-use crate::planning::TodoManager;
+use crate::planning::{TodoItem, TodoManager, TodoStatus};
 use std::future::Future;
 use std::pin::Pin;
 use std::sync::atomic::Ordering;
@@ -90,14 +93,28 @@ impl SessionRuntime {
         config: SessionRuntimeConfig,
         event_tx: &FrontendEventSender,
     ) -> Result<(), AgentError> {
-        let provider = create_provider(
+        let provider = match create_provider(
             config.provider_type,
             &config.model,
             config.base_url.as_deref(),
             config.thinking,
             config.thinking_budget,
             self.todo_manager(),
-        )?;
+        ) {
+            Ok(provider) => provider,
+            Err(error) => {
+                let _ = self
+                    .emit_event(
+                        event_tx,
+                        FrontendEvent::Error {
+                            turn_id: SESSION_START_TURN_ID,
+                            message: error.to_string(),
+                        },
+                    )
+                    .await;
+                return Err(error.into());
+            }
+        };
 
         self.start_with_provider(provider, config.provider_type.to_string(), config.model, event_tx)
             .await
@@ -118,7 +135,8 @@ impl SessionRuntime {
                 model: model.into(),
             },
         )
-        .await
+        .await?;
+        self.emit_todo_snapshot(event_tx, SESSION_START_TURN_ID).await
     }
 
     pub async fn handle_command(
@@ -128,10 +146,12 @@ impl SessionRuntime {
     ) -> Result<SessionRuntimeOutcome, AgentError> {
         match command {
             FrontendCommand::SubmitMessage(text) => {
+                let error_turn_id = self.active_turn_id();
                 if let Err(error) = self.submit_message(text, event_tx).await {
                     self.emit_event(
                         event_tx,
                         FrontendEvent::Error {
+                            turn_id: error_turn_id,
                             message: error.to_string(),
                         },
                     )
@@ -196,15 +216,17 @@ impl SessionRuntime {
         F: for<'a> FnOnce(&'a [Message], &'a str, &'a LlmProvider, TodoUsageHook) -> TurnFuture<'a>,
     {
         let provider = self.provider.as_ref().ok_or_else(not_started_error)?;
+        let turn_id = self.next_turn_id();
         self.emit_event(
             event_tx,
             FrontendEvent::UserMessageCommitted {
+                turn_id,
                 text: current_input.clone(),
             },
         )
         .await?;
 
-        let (hook, used_todo_flag) = TodoUsageHook::new(Some(event_tx.clone()));
+        let (hook, used_todo_flag) = TodoUsageHook::new(turn_id, Some(event_tx.clone()));
         let turn = executor(&self.messages, &current_input, provider, hook).await?;
         let todo_used = used_todo_flag.load(Ordering::SeqCst);
 
@@ -213,16 +235,12 @@ impl SessionRuntime {
         }
 
         let reminder = self.todo_reminder_message().await;
-        let display_response = if let Some(ref reminder_text) = reminder {
-            format!("<reminder>{}</reminder>\n\n{}", reminder_text, turn.response)
-        } else {
-            turn.response.clone()
-        };
 
         self.emit_event(
             event_tx,
             FrontendEvent::AssistantMessageCompleted {
-                text: display_response,
+                turn_id,
+                text: turn.response.clone(),
             },
         )
         .await?;
@@ -231,10 +249,15 @@ impl SessionRuntime {
             self.emit_event(
                 event_tx,
                 FrontendEvent::Reminder {
+                    turn_id,
                     message: message.clone(),
                 },
             )
             .await?;
+        }
+
+        if todo_used || reminder.is_some() {
+            self.emit_todo_snapshot(event_tx, turn_id).await?;
         }
 
         self.commit_turn(turn);
@@ -272,6 +295,36 @@ impl SessionRuntime {
             .map(|_| ())
             .map_err(frontend_channel_closed)
     }
+
+    fn next_turn_id(&self) -> u64 {
+        self.turn_count as u64 + 1
+    }
+
+    fn active_turn_id(&self) -> u64 {
+        if self.provider.is_some() {
+            self.next_turn_id()
+        } else {
+            SESSION_START_TURN_ID
+        }
+    }
+
+    async fn emit_todo_snapshot(
+        &self,
+        event_tx: &FrontendEventSender,
+        turn_id: u64,
+    ) -> Result<(), AgentError> {
+        let items = {
+            let manager = self.todo_manager.lock().await;
+            manager
+                .snapshot()
+                .into_iter()
+                .map(map_todo_item)
+                .collect::<Vec<_>>()
+        };
+
+        self.emit_event(event_tx, FrontendEvent::TodoSnapshot { turn_id, items })
+            .await
+    }
 }
 
 impl Default for SessionRuntime {
@@ -293,10 +346,22 @@ fn frontend_channel_closed<T>(error: tokio::sync::mpsc::error::SendError<T>) -> 
     )))
 }
 
+fn map_todo_item(item: TodoItem) -> FrontendTodoItem {
+    FrontendTodoItem {
+        id: item.id,
+        text: item.text,
+        status: match item.status {
+            TodoStatus::Pending => FrontendTodoStatus::Pending,
+            TodoStatus::InProgress => FrontendTodoStatus::InProgress,
+            TodoStatus::Completed => FrontendTodoStatus::Completed,
+        },
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::frontend::frontend_event_channel;
+    use crate::frontend::{frontend_event_channel, FrontendTodoItem, FrontendTodoStatus};
     use crate::planning::{TodoItem, TodoStatus};
 
     #[test]
@@ -368,6 +433,7 @@ mod tests {
         );
 
         let _ = event_rx.recv().await;
+        let _ = event_rx.recv().await;
         let ended = event_rx.recv().await.expect("session ended event should be emitted");
         assert_eq!(
             ended,
@@ -422,18 +488,56 @@ mod tests {
 
         while let Some(event) = event_rx.recv().await {
             match event {
-                FrontendEvent::Reminder { message } => {
+                FrontendEvent::Reminder { message, .. } => {
                     saw_reminder = message.contains("pending todos");
-                    break;
                 }
-                FrontendEvent::AssistantMessageCompleted { text } => {
+                FrontendEvent::AssistantMessageCompleted { text, .. } => {
                     saw_embedded_reminder = text.contains("<reminder>");
+                }
+                FrontendEvent::TodoSnapshot { items, .. } => {
+                    if !items.is_empty() {
+                        assert_eq!(
+                            items,
+                            vec![FrontendTodoItem {
+                                id: 1,
+                                text: "Implement runtime".to_string(),
+                                status: FrontendTodoStatus::Pending,
+                            }]
+                        );
+                        break;
+                    }
                 }
                 _ => {}
             }
         }
 
         assert!(saw_reminder);
-        assert!(saw_embedded_reminder);
+        assert!(!saw_embedded_reminder);
+    }
+
+    #[tokio::test]
+    async fn startup_emits_session_snapshot_with_reserved_turn_id() {
+        let (event_tx, mut event_rx) = frontend_event_channel(8);
+        let mut runtime = SessionRuntime::new();
+
+        runtime
+            .start_with_provider(LlmProvider::Ollama, "test", "model", &event_tx)
+            .await
+            .unwrap();
+
+        assert_eq!(
+            event_rx.recv().await,
+            Some(FrontendEvent::SessionStarted {
+                provider: "test".to_string(),
+                model: "model".to_string(),
+            })
+        );
+        assert_eq!(
+            event_rx.recv().await,
+            Some(FrontendEvent::TodoSnapshot {
+                turn_id: SESSION_START_TURN_ID,
+                items: Vec::new(),
+            })
+        );
     }
 }
