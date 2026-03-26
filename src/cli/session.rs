@@ -319,7 +319,8 @@ mod tests {
         Session::drain_events(&mut app, &mut event_rx);
 
         let lines = render_lines(&mut app);
-        assert!(lines.iter().any(|line| line.contains("Connected: ollama")));
+        // Status shows spinner when streaming is active (not "Connected" label)
+        assert!(lines.iter().any(|line| line.contains("Thinking") || line.contains("Processing")));
         assert!(lines.iter().any(|line| line.contains("<<< Assistant")));
         assert!(lines.iter().any(|line| line.contains("backlogged delta")));
     }

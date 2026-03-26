@@ -1,6 +1,7 @@
 mod args;
 mod app;
 mod session;
+pub mod spinner;
 mod terminal;
 pub mod theme;
 

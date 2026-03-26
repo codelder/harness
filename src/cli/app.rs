@@ -1,11 +1,10 @@
+use crate::cli::spinner::Spinner;
 use crate::cli::theme::CliTheme;
 use crate::frontend::{FrontendCommand, FrontendEvent, FrontendTodoItem, FrontendTodoStatus};
 use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 use ratatui::layout::{Constraint, Direction, Layout, Rect};
 use ratatui::prelude::{Frame, Line};
-use ratatui::style::{Modifier, Style};
 use ratatui::widgets::{Block, Borders, Paragraph, Wrap};
-use unicode_width::UnicodeWidthStr;
 
 const APP_BANNER: &str = "Harness";
 const SCROLL_STEP: u16 = 1;
@@ -104,6 +103,7 @@ pub struct CliApp {
     should_exit: bool,
     exit_requested: bool,
     theme: CliTheme,
+    spinner: Spinner,
 }
 
 impl CliApp {
@@ -120,6 +120,7 @@ impl CliApp {
             should_exit: false,
             exit_requested: false,
             theme: CliTheme::default(),
+            spinner: Spinner::new(),
         }
     }
 
@@ -157,6 +158,7 @@ impl CliApp {
             }
             FrontendEvent::AssistantMessageCompleted { turn_id, text } => {
                 self.streaming_assistant = None;
+                self.spinner.reset();
                 self.timeline
                     .push(TimelineBlock::AssistantMessage { turn_id, text });
                 self.status = self.connection_label();
@@ -397,10 +399,16 @@ impl CliApp {
         }
     }
 
-    fn status_line(&self) -> Line<'static> {
+    fn status_line(&mut self) -> Line<'static> {
+        let status = if self.streaming_assistant.is_some() {
+            // Show spinner during assistant activity
+            self.spinner.status_text()
+        } else {
+            self.status.clone()
+        };
         Line::from(format!(
             "{} | Enter submit | Ctrl+C interrupt | Esc exit | Scroll Up/Down PgUp/PgDn Home/End",
-            self.status
+            status
         ))
     }
 
