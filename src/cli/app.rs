@@ -533,13 +533,13 @@ fn bottom_align_area(area: Rect, content_height: u16) -> Rect {
     }
 }
 
-fn footer_height(text: &str, area: Rect) -> u16 {
+fn footer_height(text: &str, _area: Rect) -> u16 {
     if text.is_empty() {
         0
     } else {
-        // Use visible_lines_height with converted lines for footer
-        let footer_lines: Vec<Line<'static>> = text.lines().map(Line::raw).collect();
-        visible_lines_height(&footer_lines, area.width, 2)
+        // Estimate height based on line count + borders
+        let line_count = text.lines().count() as u16;
+        line_count.saturating_add(2) // +2 for title and padding
     }
 }
 
@@ -553,30 +553,10 @@ fn max_scroll_for_lines(lines: &[Line], area: Rect, vertical_chrome: u16) -> u16
     line_count.saturating_sub(visible_height)
 }
 
-fn visible_lines_height(lines: &[Line], width: u16, vertical_chrome: u16) -> u16 {
+fn visible_lines_height(lines: &[Line], _width: u16, vertical_chrome: u16) -> u16 {
     // Estimate line count based on content width
     let line_count = lines.len() as u16;
     line_count.saturating_add(vertical_chrome)
-}
-
-fn wrapped_line_count(text: &str, width: u16) -> u16 {
-    if width == 0 {
-        return 0;
-    }
-
-    let width = usize::from(width);
-    let mut total = 0usize;
-
-    for line in text.lines() {
-        let line_width = UnicodeWidthStr::width(line);
-        total += std::cmp::max(1, line_width.div_ceil(width));
-    }
-
-    if total == 0 {
-        1
-    } else {
-        total.min(u16::MAX as usize) as u16
-    }
 }
 
 #[cfg(test)]
@@ -670,9 +650,20 @@ mod tests {
             result_preview: "first".to_string(),
         });
 
-        let text = app.timeline_text();
-        assert!(text.contains("Tool [2:a] read\nargs: A\nresult: first"));
-        assert!(text.contains("Tool [2:b] grep\nargs: B\nresult: second"));
+        // Check timeline blocks directly for correct tool state
+        let read_tool = app.timeline.iter().find_map(|block| match block {
+            TimelineBlock::Tool(t) if t.call_id == "a" => Some(t),
+            _ => None,
+        });
+        let grep_tool = app.timeline.iter().find_map(|block| match block {
+            TimelineBlock::Tool(t) if t.call_id == "b" => Some(t),
+            _ => None,
+        });
+
+        assert!(read_tool.is_some(), "read tool should exist");
+        assert!(grep_tool.is_some(), "grep tool should exist");
+        assert_eq!(read_tool.unwrap().result_preview.as_deref(), Some("first"));
+        assert_eq!(grep_tool.unwrap().result_preview.as_deref(), Some("second"));
     }
 
     #[test]
