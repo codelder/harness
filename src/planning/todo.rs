@@ -1,6 +1,6 @@
-use std::str::FromStr;
-use serde::{Deserialize, Serialize};
 use schemars::JsonSchema;
+use serde::{Deserialize, Serialize};
+use std::str::FromStr;
 
 /// Maximum number of todo items allowed
 const MAX_ITEMS: usize = 20;
@@ -75,6 +75,11 @@ impl TodoManager {
     /// Check if the manager has no items
     pub fn is_empty(&self) -> bool {
         self.items.is_empty()
+    }
+
+    /// Return a clone of the current todo state for typed frontend snapshots.
+    pub fn snapshot(&self) -> Vec<TodoItem> {
+        self.items.clone()
     }
 
     /// Update the todo list with new items
@@ -221,12 +226,50 @@ mod tests {
     }
 
     #[test]
+    fn runtime_snapshot_returns_cloned_items() {
+        let mut manager = TodoManager::new();
+        manager
+            .update(vec![TodoItem::new(
+                1,
+                "Keep runtime snapshots typed".to_string(),
+                TodoStatus::InProgress,
+            )])
+            .unwrap();
+
+        let mut snapshot = manager.snapshot();
+        snapshot[0].text = "Mutated copy".to_string();
+        snapshot.push(TodoItem::new(
+            2,
+            "Local only".to_string(),
+            TodoStatus::Pending,
+        ));
+
+        assert_eq!(
+            manager.snapshot(),
+            vec![TodoItem::new(
+                1,
+                "Keep runtime snapshots typed".to_string(),
+                TodoStatus::InProgress,
+            )]
+        );
+    }
+
+    #[test]
     fn test_todo_status_from_str_valid() {
         assert_eq!("pending".parse::<TodoStatus>(), Ok(TodoStatus::Pending));
         assert_eq!("PENDING".parse::<TodoStatus>(), Ok(TodoStatus::Pending));
-        assert_eq!("in_progress".parse::<TodoStatus>(), Ok(TodoStatus::InProgress));
-        assert_eq!("IN_PROGRESS".parse::<TodoStatus>(), Ok(TodoStatus::InProgress));
-        assert_eq!("in-progress".parse::<TodoStatus>(), Ok(TodoStatus::InProgress));
+        assert_eq!(
+            "in_progress".parse::<TodoStatus>(),
+            Ok(TodoStatus::InProgress)
+        );
+        assert_eq!(
+            "IN_PROGRESS".parse::<TodoStatus>(),
+            Ok(TodoStatus::InProgress)
+        );
+        assert_eq!(
+            "in-progress".parse::<TodoStatus>(),
+            Ok(TodoStatus::InProgress)
+        );
         assert_eq!("completed".parse::<TodoStatus>(), Ok(TodoStatus::Completed));
         assert_eq!("COMPLETED".parse::<TodoStatus>(), Ok(TodoStatus::Completed));
     }
@@ -243,9 +286,7 @@ mod tests {
     #[test]
     fn test_todo_manager_empty_text() {
         let mut manager = TodoManager::new();
-        let items = vec![
-            TodoItem::new(1, "".to_string(), TodoStatus::Pending),
-        ];
+        let items = vec![TodoItem::new(1, "".to_string(), TodoStatus::Pending)];
 
         let result = manager.update(items);
         assert!(matches!(result, Err(TodoError::MissingText(1))));
