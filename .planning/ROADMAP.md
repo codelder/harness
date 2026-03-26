@@ -77,7 +77,7 @@ See: [v0.3-ROADMAP.md](milestones/v0.3-ROADMAP.md)
 
 Plans:
 - [x] 3.2-01-PLAN.md — Repair the frontend protocol for turn identity, tool correlation, and todo snapshots
-- [ ] 3.2-02-PLAN.md — Wire the headless runtime and PromptHook path to emit correlated unified-timeline events
+- [x] 3.2-02-PLAN.md — Wire the headless runtime and PromptHook path to emit correlated unified-timeline events
 - [ ] 3.2-03-PLAN.md — Rebuild the ratatui CLI as a single-column timeline with overflow and lifecycle regression coverage
 
 ### Phase 4: s04 - Subagents
@@ -116,7 +116,7 @@ Plans:
 | 2. s02 - Tool Use | v0.2 | 3/3 | Complete | 2026-03-23 |
 | 3. s03 - TodoWrite | v0.3 | 4/4 | Complete | 2026-03-24 |
 | 3.1 Code Review Fixes | v0.3 | 1/1 | Complete | 2026-03-24 |
-| 3.2 Terminal UI + Frontend Interface | v0.4 | 1/3 | In Progress | - |
+| 3.2 Terminal UI + Frontend Interface | v0.4 | 2/3 | In Progress | - |
 | 4. s04 - Subagents | v0.4 | 0/TBD | Not started | - |
 | 5. s05 - Skills | v1.0 | 0/TBD | Not started | - |
 | 6. s06 - Context Compact | v1.0 | 0/TBD | Not started | - |

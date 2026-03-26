@@ -3,13 +3,13 @@ gsd_state_version: 1.0
 milestone: v0.4
 milestone_name: Subagents
 status: Executing Phase 03.2
-last_updated: "2026-03-26T03:08:48.994Z"
+last_updated: "2026-03-26T03:21:35.240Z"
 last_activity: 2026-03-26
 progress:
   total_phases: 2
   completed_phases: 0
   total_plans: 3
-  completed_plans: 1
+  completed_plans: 2
 ---
 
 # Project State
@@ -32,7 +32,7 @@ See: .planning/PROJECT.md (updated 2026-03-24)
 ## Current Position
 
 Phase: 03.2 (terminal-ui-and-frontend-interface-abstraction) — EXECUTING
-Plan: 2 of 3
+Plan: 3 of 3
 
 ## Accumulated Context
 
@@ -55,6 +55,8 @@ Decisions are logged in PROJECT.md Key Decisions table.
 - [Phase 03.2]: Keep SESSION_START_TURN_ID as the explicit reserved identity for session-start todo snapshots and default hook construction.
 - [Phase 03.2]: Keep ToolCallFinished.name alongside turn_id and call_id so reducers never need a side lookup to label tool results.
 - [Phase 03.2]: Represent todo footer state as TodoSnapshot emitted from the runtime instead of parsing reminder text.
+- [Phase 03.2]: Emit TodoSnapshot only when TodoManager state changes or reminders need the pinned footer, so tool observation alone does not churn the reducer.
+- [Phase 03.2]: Align hook-focused test names with cargo test runtime --lib so the plan verification command exercises PromptHook observability.
 
 ### Pending Todos
 
@@ -67,3 +69,11 @@ None.
 ## Session Continuity
 
 Last activity: 2026-03-26
+Last session: 2026-03-26T03:21:35Z
+Stopped At: Completed 03.2-02-PLAN.md
+
+## Performance Metrics
+
+| Phase | Plan | Duration | Tasks | Files | Date |
+|-------|------|----------|-------|-------|------|
+| 03.2 | 02 | 11min | 2 | 3 | 2026-03-26 |
