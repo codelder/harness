@@ -477,7 +477,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn test_hook_emits_tool_and_retry_events() {
+    async fn hook_runtime_emits_tool_and_retry_events() {
         let (event_tx, mut event_rx) = frontend_event_channel(8);
         let (hook, used_todo) = TodoUsageHook::new(7, Some(event_tx));
 
@@ -529,8 +529,62 @@ mod tests {
         );
     }
 
+    #[tokio::test]
+    async fn hook_runtime_falls_back_to_internal_call_ids() {
+        let (event_tx, mut event_rx) = frontend_event_channel(8);
+        let (hook, _used_todo) = TodoUsageHook::new(9, Some(event_tx));
+
+        hook.record_tool_call("read", None, "internal-call", "{\"path\":\"README.md\"}")
+            .await;
+        hook.record_tool_result("read", None, "internal-call", "\"contents\"")
+            .await;
+
+        assert_eq!(
+            event_rx.recv().await,
+            Some(FrontendEvent::ToolCallStarted {
+                turn_id: 9,
+                call_id: "internal-call".to_string(),
+                name: "read".to_string(),
+                args_preview: "{\"path\":\"README.md\"}".to_string(),
+            })
+        );
+        assert_eq!(
+            event_rx.recv().await,
+            Some(FrontendEvent::ToolCallFinished {
+                turn_id: 9,
+                call_id: "internal-call".to_string(),
+                name: "read".to_string(),
+                result_preview: "contents".to_string(),
+            })
+        );
+    }
+
+    #[tokio::test]
+    async fn hook_runtime_emits_turn_scoped_streaming_events() {
+        let (event_tx, mut event_rx) = frontend_event_channel(8);
+        let (hook, _used_todo) = TodoUsageHook::new(5, Some(event_tx));
+
+        hook.record_thinking("reasoning".to_string()).await;
+        hook.record_text_delta("delta").await;
+
+        assert_eq!(
+            event_rx.recv().await,
+            Some(FrontendEvent::Thinking {
+                turn_id: 5,
+                text: "reasoning".to_string(),
+            })
+        );
+        assert_eq!(
+            event_rx.recv().await,
+            Some(FrontendEvent::AssistantMessageDelta {
+                turn_id: 5,
+                delta: "delta".to_string(),
+            })
+        );
+    }
+
     #[test]
-    fn default_hook_uses_session_start_turn_id() {
+    fn runtime_default_hook_uses_session_start_turn_id() {
         let hook = TodoUsageHook::default();
         assert_eq!(hook.turn_id, SESSION_START_TURN_ID);
     }

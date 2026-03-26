@@ -624,4 +624,46 @@ mod tests {
             })
         );
     }
+
+    #[tokio::test]
+    async fn runtime_reports_preturn_submit_errors_with_session_start_turn_id() {
+        let (event_tx, mut event_rx) = frontend_event_channel(8);
+        let mut runtime = SessionRuntime::new();
+
+        let outcome = runtime
+            .handle_command(
+                FrontendCommand::SubmitMessage("hello".to_string()),
+                &event_tx,
+            )
+            .await
+            .unwrap();
+
+        assert_eq!(outcome, SessionRuntimeOutcome::Continue);
+        assert_eq!(
+            event_rx.recv().await,
+            Some(FrontendEvent::Error {
+                turn_id: SESSION_START_TURN_ID,
+                message: not_started_error().to_string(),
+            })
+        );
+    }
+
+    #[tokio::test]
+    async fn runtime_interrupt_command_emits_status_outcome() {
+        let (event_tx, mut event_rx) = frontend_event_channel(8);
+        let mut runtime = SessionRuntime::new();
+
+        let outcome = runtime
+            .handle_command(FrontendCommand::Interrupt, &event_tx)
+            .await
+            .unwrap();
+
+        assert_eq!(outcome, SessionRuntimeOutcome::Interrupted);
+        assert_eq!(
+            event_rx.recv().await,
+            Some(FrontendEvent::Status {
+                message: "Interrupt requested but not yet implemented".to_string(),
+            })
+        );
+    }
 }
