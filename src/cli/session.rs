@@ -2,14 +2,8 @@ use crate::cli::app::CliApp;
 use crate::cli::terminal::{spawn_input_listener, TerminalGuard};
 use crate::error::{AgentError, ProviderError};
 use crate::frontend::{
-    frontend_command_channel,
-    frontend_event_channel,
-    send_frontend_command,
-    FrontendCommand,
-    FrontendCommandReceiver,
-    FrontendCommandSender,
-    FrontendEventReceiver,
-    FrontendEventSender,
+    frontend_command_channel, frontend_event_channel, send_frontend_command, FrontendCommand,
+    FrontendCommandReceiver, FrontendCommandSender, FrontendEventReceiver, FrontendEventSender,
 };
 use crate::session::{SessionRuntime, SessionRuntimeConfig, SessionRuntimeOutcome};
 use crossterm::event::KeyEvent;
@@ -110,8 +104,7 @@ impl Session {
         input_rx: &mut mpsc::UnboundedReceiver<KeyEvent>,
     ) -> Result<(), AgentError> {
         loop {
-            Self::drain_events(app, event_rx);
-            flush_best_effort(event_tx).await?;
+            Self::drain_events_and_flush(app, event_rx, event_tx).await?;
             terminal.draw(|frame| app.render(frame)).map_err(terminal_error)?;
 
             if app.should_exit() {
@@ -147,6 +140,15 @@ impl Session {
         while let Ok(event) = event_rx.try_recv() {
             app.apply_event(event);
         }
+    }
+
+    async fn drain_events_and_flush(
+        app: &mut CliApp,
+        event_rx: &mut FrontendEventReceiver,
+        event_tx: &FrontendEventSender,
+    ) -> Result<(), AgentError> {
+        Self::drain_events(app, event_rx);
+        flush_best_effort(event_tx).await
     }
 }
 
@@ -220,6 +222,28 @@ async fn flush_best_effort(event_tx: &FrontendEventSender) -> Result<(), AgentEr
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::frontend::{
+        EmitOutcome, FrontendEvent, FrontendSessionSummary, SESSION_START_TURN_ID,
+    };
+    use ratatui::backend::TestBackend;
+    use ratatui::Terminal;
+
+    fn render_lines(app: &mut CliApp) -> Vec<String> {
+        let backend = TestBackend::new(60, 12);
+        let mut terminal = Terminal::new(backend).expect("test terminal should initialize");
+        terminal
+            .draw(|frame| app.render(frame))
+            .expect("render should succeed");
+
+        let buffer = terminal.backend().buffer().clone();
+        (0..buffer.area.height)
+            .map(|row| {
+                (0..buffer.area.width)
+                    .map(|col| buffer[(col, row)].symbol())
+                    .collect::<String>()
+            })
+            .collect()
+    }
 
     #[test]
     fn test_session_initialization() {
@@ -261,5 +285,74 @@ mod tests {
         let manager2 = session.todo_manager();
 
         assert!(Arc::ptr_eq(&manager1, &manager2));
+    }
+
+    #[tokio::test]
+    async fn drain_events_and_flush_delivers_best_effort_backlog() {
+        let (event_tx, mut event_rx) = frontend_event_channel(1);
+        let mut app = CliApp::new();
+
+        event_tx
+            .emit(FrontendEvent::SessionStarted {
+                provider: "ollama".to_string(),
+                model: "test-model".to_string(),
+            })
+            .await
+            .expect("session started should fit");
+
+        let outcome = event_tx
+            .emit(FrontendEvent::AssistantMessageDelta {
+                turn_id: SESSION_START_TURN_ID + 1,
+                delta: "backlogged delta".to_string(),
+            })
+            .await
+            .expect("best-effort delta should not fail");
+
+        assert_eq!(outcome, EmitOutcome::Coalesced);
+
+        Session::drain_events_and_flush(&mut app, &mut event_rx, &event_tx)
+            .await
+            .expect("ui loop flush should succeed");
+        Session::drain_events(&mut app, &mut event_rx);
+
+        let lines = render_lines(&mut app);
+        assert!(lines.iter().any(|line| line.contains("Connected: ollama")));
+        assert!(lines.iter().any(|line| line.contains("Assistant [1]")));
+        assert!(lines.iter().any(|line| line.contains("backlogged delta")));
+    }
+
+    #[tokio::test]
+    async fn session_end_still_uses_runtime_event_path() {
+        let (event_tx, mut event_rx) = frontend_event_channel(8);
+        let mut runtime = SessionRuntime::new();
+
+        runtime
+            .start_with_provider(crate::llm::LlmProvider::Ollama, "ollama", "test-model", &event_tx)
+            .await
+            .expect("runtime should start");
+        let _ = event_rx.recv().await;
+
+        let outcome = runtime
+            .handle_command(FrontendCommand::Exit, &event_tx)
+            .await
+            .expect("exit should succeed");
+
+        assert_eq!(
+            outcome,
+            SessionRuntimeOutcome::Exit(FrontendSessionSummary {
+                turns: 0,
+                message_count: 1,
+            })
+        );
+
+        let mut saw_session_end = false;
+        while let Some(event) = event_rx.recv().await {
+            if matches!(event, FrontendEvent::SessionEnded { .. }) {
+                saw_session_end = true;
+                break;
+            }
+        }
+
+        assert!(saw_session_end, "runtime should emit SessionEnded");
     }
 }

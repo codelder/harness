@@ -799,7 +799,12 @@ mod tests {
             .iter()
             .position(|line| line.contains("Pinned footer"))
             .expect("footer text should render");
-        assert!(footer_row >= 8);
+        let composer_row = lines
+            .iter()
+            .position(|line| line.contains("> Type a message..."))
+            .expect("composer should render");
+
+        assert!(footer_row < composer_row);
     }
 
     #[test]
