@@ -320,7 +320,7 @@ mod tests {
 
         let lines = render_lines(&mut app);
         assert!(lines.iter().any(|line| line.contains("Connected: ollama")));
-        assert!(lines.iter().any(|line| line.contains("Assistant [1]")));
+        assert!(lines.iter().any(|line| line.contains("<<< Assistant")));
         assert!(lines.iter().any(|line| line.contains("backlogged delta")));
     }
 
