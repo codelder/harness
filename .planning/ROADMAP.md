@@ -47,7 +47,7 @@ See: [v0.3-ROADMAP.md](milestones/v0.3-ROADMAP.md)
 
 ### ⚡ Inserted Work (Planned)
 
-- [x] **Phase 3.2: Terminal UI and Frontend Interface Abstraction (INSERTED)** — Replace reedline with ratatui and define a shared interface for CLI, web, desktop, and social frontends
+- [ ] **Phase 3.2: Terminal UI and Frontend Interface Abstraction (INSERTED)** — Replace the split-pane ratatui workbench with a single-column Claude Code-like terminal UI and repair the shared frontend protocol for future adapters
 
 ### 📋 v0.4 Subagents (Planned)
 
@@ -55,24 +55,30 @@ See: [v0.3-ROADMAP.md](milestones/v0.3-ROADMAP.md)
 
 ### Phase 3.2: Terminal UI and Frontend Interface Abstraction (INSERTED)
 
-**Goal**: Replace the reedline-based REPL with a ratatui-driven terminal experience and introduce a shared frontend session interface that can connect the agent loop to CLI, web, desktop, and social surfaces.
+**Goal**: Replace the split-pane ratatui workbench with a Claude Code-like single-column terminal UI and a corrected shared frontend protocol that can later support CLI, web, desktop, and social adapters.
 **Depends on**: Phase 3.1
-**Requirements**: TBD
+**Requirements**: SC-1, SC-2, SC-3, SC-4, SC-5
+**Requirement Map**:
+
+  - `SC-1` Single-column Claude Code-like terminal layout with compact empty state
+  - `SC-2` Headless runtime remains independent from CLI-specific I/O
+  - `SC-3` Shared protocol represents streaming, tool, retry, interrupt, and lifecycle events over typed channels
+  - `SC-4` Tool results stay paired with their calls and todo state updates in place as a pinned footer
+  - `SC-5` Overflow, resize, exit, and panic/error paths keep content visible and restore the terminal cleanly
 **Success Criteria** (what must be TRUE):
 
-  1. The interactive terminal experience runs on ratatui instead of reedline
-  2. The agent loop no longer depends directly on CLI-specific input/output primitives
-  3. A shared frontend/session interface can drive the existing CLI and future web, desktop, or social adapters
-  4. Streaming model output, tool activity, and user interrupts can be represented through the shared interface
-  5. Existing session lifecycle behavior remains functional during the migration
+  1. The interactive terminal experience uses a single-column Claude Code-like layout with banner, unified timeline, composer, and status
+  2. The agent loop and session runtime no longer depend directly on CLI-specific input/output primitives
+  3. A shared frontend/session protocol can represent streaming output, tool activity, interrupts, lifecycle events, and event identity
+  4. Tool call/result groups stay paired in the unified stream and the todo list stays pinned at the bottom with in-place updates
+  5. Overflowing content remains reachable through unified scroll/viewport behavior and terminal exit/error paths restore the shell cleanly
 
-**Plans**: 4 plans in 4 waves
+**Plans**: 3 plans in 3 waves
 
 Plans:
-- [x] 3.2-01-PLAN.md — Extract shared runtime and typed frontend protocol
-- [x] 3.2-02-PLAN.md — Refactor hook/retry observability into structured events
-- [x] 3.2-03-PLAN.md — Implement ratatui CLI adapter and main boot integration
-- [x] 3.2-04-PLAN.md — Add migration verification, cleanup, and regression coverage
+- [ ] 3.2-01-PLAN.md — Repair the frontend protocol for turn identity, tool correlation, and todo snapshots
+- [ ] 3.2-02-PLAN.md — Wire the headless runtime and PromptHook path to emit correlated unified-timeline events
+- [ ] 3.2-03-PLAN.md — Rebuild the ratatui CLI as a single-column timeline with overflow and lifecycle regression coverage
 
 ### Phase 4: s04 - Subagents
 
@@ -110,7 +116,7 @@ Plans:
 | 2. s02 - Tool Use | v0.2 | 3/3 | Complete | 2026-03-23 |
 | 3. s03 - TodoWrite | v0.3 | 4/4 | Complete | 2026-03-24 |
 | 3.1 Code Review Fixes | v0.3 | 1/1 | Complete | 2026-03-24 |
-| 3.2 Terminal UI + Frontend Interface | v0.4 | 4/4 | Complete | 2026-03-25 |
+| 3.2 Terminal UI + Frontend Interface | v0.4 | 0/3 | Planned | - |
 | 4. s04 - Subagents | v0.4 | 0/TBD | Not started | - |
 | 5. s05 - Skills | v1.0 | 0/TBD | Not started | - |
 | 6. s06 - Context Compact | v1.0 | 0/TBD | Not started | - |
