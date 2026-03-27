@@ -29,7 +29,7 @@ pub enum SubagentError {
 ///
 /// Holds provider configuration (NOT a provider instance) to prevent
 /// recursion -- child agents must not inherit the parent's `task` tool.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct SubagentConfig {
     pub provider_type: ProviderType,
     pub model: String,
@@ -158,6 +158,13 @@ mod tests {
     use super::*;
 
     #[test]
+    fn test_task_args_deserialize() {
+        let json = r#"{"prompt": "do something"}"#;
+        let args: TaskArgs = serde_json::from_str(json).expect("deserialization should succeed");
+        assert_eq!(args.prompt, "do something");
+    }
+
+    #[test]
     fn test_task_args_schema_generation() {
         let schema = schemars::schema_for!(TaskArgs);
         let schema_value = serde_json::to_value(&schema).expect("schema serialization");
@@ -178,6 +185,20 @@ mod tests {
         assert_eq!(config.model, "claude-3-5-sonnet-20241022");
         assert!(config.base_url.is_none());
         assert_eq!(config.max_turns, 30);
+    }
+
+    #[test]
+    fn test_subagent_config_clone() {
+        let config = SubagentConfig {
+            provider_type: ProviderType::Anthropic,
+            model: "claude-3-5-sonnet-20241022".to_string(),
+            base_url: Some("http://localhost:8080".to_string()),
+            thinking: true,
+            thinking_budget: 5000,
+            max_turns: 30,
+        };
+        let cloned = config.clone();
+        assert_eq!(config, cloned);
     }
 
     #[test]
