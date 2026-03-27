@@ -3,14 +3,14 @@ gsd_state_version: 1.0
 milestone: v0.4
 milestone_name: Subagents
 status: Ready to execute
-stopped_at: Completed 03.2.1-07-PLAN.md
-last_updated: "2026-03-27T18:29:10.598Z"
+stopped_at: Completed 03.2.1-08-PLAN.md
+last_updated: "2026-03-27T18:55:39.224Z"
 last_activity: 2026-03-27
 progress:
   total_phases: 3
   completed_phases: 2
-  total_plans: 10
-  completed_plans: 10
+  total_plans: 11
+  completed_plans: 11
 ---
 
 # Project State
@@ -33,7 +33,7 @@ See: .planning/PROJECT.md (updated 2026-03-24)
 ## Current Position
 
 Phase: 03.2.1 (tui-alignment-with-claude-code) — EXECUTING
-Plan: 2 of 7
+Plan: 3 of 7
 
 ## Accumulated Context
 
@@ -63,6 +63,7 @@ Decisions are logged in PROJECT.md Key Decisions table.
 - [Phase 03.2]: Track raw-mode and alternate-screen state explicitly in TerminalGuard so every partial-construction failure path can roll back safely.
 - [Phase 03.2]: Use source-included terminal smoke helpers in integration tests to verify restore behavior without a live TTY or model call.
 - [Phase 03.2.1]: Token usage data available in rig-core 0.31.0 via completion::Usage but wiring deferred - requires refactoring LlmProvider, AgentTurn, and agent_loop to propagate PromptResponse.total_usage
+- [Phase 03.2.1]: Use extended_details() on PromptRequest to get PromptResponse with total_usage for token tracking in agent pipeline
 
 ### Pending Todos
 
@@ -75,8 +76,8 @@ None.
 ## Session Continuity
 
 Last activity: 2026-03-27
-Last session: 2026-03-27T18:29:10.596Z
-Stopped At: Completed 03.2.1-07-PLAN.md
+Last session: 2026-03-27T18:55:39.222Z
+Stopped At: Completed 03.2.1-08-PLAN.md
 
 ## Performance Metrics
 
@@ -85,3 +86,4 @@ Stopped At: Completed 03.2.1-07-PLAN.md
 | 03.2 | 02 | 11min | 2 | 3 | 2026-03-26 |
 | Phase 03.2 P03 | 22min | 3 tasks | 4 files |
 | Phase 03.2.1 P07 | 5min | 5 tasks | 3 files |
+| Phase 03.2.1 P08 | 4min | 2 tasks | 4 files |

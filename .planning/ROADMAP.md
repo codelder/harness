@@ -106,7 +106,7 @@ Plans:
 - [x] 3.2.1-05-PLAN.md -- Enhanced Banner info panel
 - [x] 3.2.1-06-PLAN.md -- Enhanced Todo display (auto-collapse + write to history)
 - [x] 3.2.1-07-PLAN.md -- Enhanced Statusline (token context)
-- [ ] 3.2.1-08-PLAN.md -- [GAP CLOSURE] Wire token usage emission chain (REQ-3.2.1-07)
+- [x] 3.2.1-08-PLAN.md -- [GAP CLOSURE] Wire token usage emission chain (REQ-3.2.1-07)
 
 ### Phase 4: s04 - Subagents
 
