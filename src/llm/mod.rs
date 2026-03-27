@@ -1,3 +1,3 @@
 mod provider;
 
-pub use provider::{create_provider, LlmProvider, ProviderType};
+pub use provider::{create_provider, create_parent_provider, LlmProvider, ProviderType};

@@ -4,7 +4,7 @@ use crate::frontend::{
     FrontendCommand, FrontendEvent, FrontendEventSender, FrontendSessionSummary, FrontendTodoItem,
     FrontendTodoStatus, HARNESS_VERSION, SESSION_START_TURN_ID,
 };
-use crate::llm::{create_provider, LlmProvider, ProviderType};
+use crate::llm::{create_parent_provider, LlmProvider, ProviderType};
 use crate::planning::{TodoItem, TodoManager, TodoStatus};
 use std::future::Future;
 use std::pin::Pin;
@@ -92,7 +92,7 @@ impl SessionRuntime {
         config: SessionRuntimeConfig,
         event_tx: &FrontendEventSender,
     ) -> Result<(), AgentError> {
-        let provider = match create_provider(
+        let provider = match create_parent_provider(
             config.provider_type,
             &config.model,
             config.base_url.as_deref(),

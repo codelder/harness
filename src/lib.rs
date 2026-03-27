@@ -10,7 +10,7 @@ pub mod subagent;
 
 // Re-exports for convenience
 pub use error::{AgentError, ProviderError};
-pub use llm::{create_provider, LlmProvider, ProviderType};
+pub use llm::{create_provider, create_parent_provider, LlmProvider, ProviderType};
 pub use agent::{agent_loop, with_retry, Message, Role};
 pub use cli::{Args, Provider, Session};
 pub use frontend::{

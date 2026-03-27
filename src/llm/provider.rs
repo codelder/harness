@@ -2,6 +2,7 @@ use crate::error::ProviderError;
 use crate::tools::{BashTool, ReadTool, WriteTool, EditTool, GlobTool, GrepTool, TodoTool};
 use crate::planning::TodoManager;
 use crate::agent::TodoUsageHook;
+use crate::subagent::{SubagentTool, SubagentConfig};
 use std::sync::Arc;
 use tokio::sync::Mutex;
 use rig::agent::{Agent, AgentBuilder, PromptRequest};
@@ -24,8 +25,26 @@ Available tools:
 
 Use these tools to interact with the system and accomplish tasks."#;
 
+/// System prompt for the parent agent (includes the task tool)
+const PARENT_SYSTEM_PROMPT: &str = r#"You are an AI agent with access to tools for interacting with the system.
+
+Available tools:
+- bash: Execute shell commands
+- read: Read file contents
+- write: Create or overwrite files
+- edit: Perform precise string replacements in files
+- glob: Find files matching patterns
+- grep: Search file contents with regex
+- todo: Track progress on multi-step tasks
+- task: Spawn a subagent with fresh context to handle a subtask
+
+Use these tools to interact with the system and accomplish tasks. Use the task tool to delegate subtasks when parallel or isolated work is beneficial."#;
+
 /// Maximum number of tool-calling turns before returning to the user
 const DEFAULT_MAX_TURNS: usize = 50;
+
+/// Maximum number of tool-calling turns for child agents (safety limit)
+const CHILD_MAX_TURNS: usize = 30;
 
 /// Supported LLM provider types
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -274,6 +293,110 @@ pub fn create_provider(
             // Will be implemented when rig-core adds Ollama support
             Ok(LlmProvider::Ollama)
         }
+    }
+}
+
+/// Create an LLM provider with subagent capability (8 tools: 7 base + task).
+///
+/// This is used by the parent agent so it can delegate subtasks to child agents.
+/// Child agents created by SubagentTool use the regular create_provider() (7 tools, no task).
+pub fn create_parent_provider(
+    provider_type: ProviderType,
+    model: &str,
+    base_url: Option<&str>,
+    thinking: bool,
+    thinking_budget: u64,
+    todo_manager: Arc<Mutex<TodoManager>>,
+) -> Result<LlmProvider, ProviderError> {
+    // Build SubagentConfig from the same parameters
+    let subagent_config = SubagentConfig {
+        provider_type,
+        model: model.to_string(),
+        base_url: base_url.map(|s| s.to_string()),
+        thinking,
+        thinking_budget,
+        max_turns: CHILD_MAX_TURNS,
+    };
+    let subagent_tool = SubagentTool::new(subagent_config);
+
+    match provider_type {
+        ProviderType::Anthropic => {
+            let api_key = std::env::var("HARNESS_ANTHROPIC_KEY")
+                .map_err(|_| ProviderError::MissingApiKey("anthropic".to_string()))?;
+
+            let mut builder = anthropic::Client::builder().api_key(api_key);
+
+            if let Some(url) = base_url {
+                builder = builder.base_url(url);
+            } else if let Ok(env_url) = std::env::var("HARNESS_ANTHROPIC_URL") {
+                builder = builder.base_url(&env_url);
+            }
+
+            let client = builder.build()
+                .map_err(|e| ProviderError::RequestFailed(format!("Failed to build client: {}", e)))?;
+
+            let completion_model = client.completion_model(model);
+            let todo_tool = TodoTool::new(todo_manager.clone());
+
+            let mut agent_builder = AgentBuilder::new(completion_model)
+                .preamble(PARENT_SYSTEM_PROMPT)
+                .tool(BashTool)
+                .tool(ReadTool)
+                .tool(WriteTool)
+                .tool(EditTool)
+                .tool(GlobTool)
+                .tool(GrepTool)
+                .tool(todo_tool)
+                .tool(subagent_tool)
+                .default_max_turns(DEFAULT_MAX_TURNS)
+                .max_tokens(4096);
+
+            if thinking {
+                let thinking_config = serde_json::json!({
+                    "thinking": {
+                        "type": "enabled",
+                        "budget_tokens": thinking_budget
+                    }
+                });
+                agent_builder = agent_builder.additional_params(thinking_config);
+            }
+
+            Ok(LlmProvider::Anthropic(agent_builder.build()))
+        }
+        ProviderType::Openai => {
+            let api_key = std::env::var("HARNESS_OPENAI_KEY")
+                .map_err(|_| ProviderError::MissingApiKey("openai".to_string()))?;
+
+            let mut builder = openai::Client::builder().api_key(api_key);
+
+            if let Some(url) = base_url {
+                builder = builder.base_url(url);
+            } else if let Ok(env_url) = std::env::var("HARNESS_OPENAI_URL") {
+                builder = builder.base_url(&env_url);
+            }
+
+            let client = builder.build()
+                .map_err(|e| ProviderError::RequestFailed(format!("Failed to build client: {}", e)))?;
+
+            let completion_model = client.completion_model(model);
+            let todo_tool = TodoTool::new(todo_manager.clone());
+
+            let agent = AgentBuilder::new(completion_model)
+                .preamble(PARENT_SYSTEM_PROMPT)
+                .tool(BashTool)
+                .tool(ReadTool)
+                .tool(WriteTool)
+                .tool(EditTool)
+                .tool(GlobTool)
+                .tool(GrepTool)
+                .tool(todo_tool)
+                .tool(subagent_tool)
+                .default_max_turns(DEFAULT_MAX_TURNS)
+                .build();
+
+            Ok(LlmProvider::Openai(agent))
+        }
+        ProviderType::Ollama => Ok(LlmProvider::Ollama),
     }
 }
 
