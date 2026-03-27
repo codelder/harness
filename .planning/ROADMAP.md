@@ -99,13 +99,13 @@ Plans:
 **Plans:** 7 plans (0/7 complete)
 
 Plans:
-- [ ] 3.2.1-01-PLAN.md — 切换到 Inline Viewport 模式
-- [ ] 3.2.1-02-PLAN.md — 添加颜色系统和主题
-- [ ] 3.2.1-03-PLAN.md — Spinner 动画和趣味状态
-- [ ] 3.2.1-04-PLAN.md — 简化消息格式
-- [ ] 3.2.1-05-PLAN.md — 增强 Banner 信息面板
-- [ ] 3.2.1-06-PLAN.md — 增强 Todo 显示（自动收起+写入历史）
-- [ ] 3.2.1-07-PLAN.md — 增强 Statusline（token 上下文）
+- [x] 3.2.1-01-PLAN.md — 切换到 Inline Viewport 模式
+- [x] 3.2.1-02-PLAN.md — 添加颜色系统和主题
+- [x] 3.2.1-03-PLAN.md — Spinner 动画和趣味状态
+- [x] 3.2.1-04-PLAN.md — 简化消息格式
+- [x] 3.2.1-05-PLAN.md — 增强 Banner 信息面板
+- [x] 3.2.1-06-PLAN.md — 增强 Todo 显示（自动收起+写入历史）
+- [x] 3.2.1-07-PLAN.md — 增强 Statusline（token 上下文）
 
 ### Phase 4: s04 - Subagents
 

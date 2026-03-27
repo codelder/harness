@@ -2,15 +2,15 @@
 gsd_state_version: 1.0
 milestone: v0.4
 milestone_name: Subagents
-status: Executing Phase 03.2.1
-stopped_at: Completed 03.2-03-PLAN.md
-last_updated: "2026-03-27T18:19:09.003Z"
+status: Ready to execute
+stopped_at: Completed 03.2.1-07-PLAN.md
+last_updated: "2026-03-27T18:29:10.598Z"
 last_activity: 2026-03-27
 progress:
   total_phases: 3
-  completed_phases: 1
+  completed_phases: 2
   total_plans: 10
-  completed_plans: 9
+  completed_plans: 10
 ---
 
 # Project State
@@ -33,7 +33,7 @@ See: .planning/PROJECT.md (updated 2026-03-24)
 ## Current Position
 
 Phase: 03.2.1 (tui-alignment-with-claude-code) — EXECUTING
-Plan: 1 of 7
+Plan: 2 of 7
 
 ## Accumulated Context
 
@@ -62,6 +62,7 @@ Decisions are logged in PROJECT.md Key Decisions table.
 - [Phase 03.2]: Keep flush_best_effort() ownership in run_ui_loop so runtime emission and UI draining stay separate.
 - [Phase 03.2]: Track raw-mode and alternate-screen state explicitly in TerminalGuard so every partial-construction failure path can roll back safely.
 - [Phase 03.2]: Use source-included terminal smoke helpers in integration tests to verify restore behavior without a live TTY or model call.
+- [Phase 03.2.1]: Token usage data available in rig-core 0.31.0 via completion::Usage but wiring deferred - requires refactoring LlmProvider, AgentTurn, and agent_loop to propagate PromptResponse.total_usage
 
 ### Pending Todos
 
@@ -74,8 +75,8 @@ None.
 ## Session Continuity
 
 Last activity: 2026-03-27
-Last session: 2026-03-26T03:44:38.340Z
-Stopped At: Completed 03.2-03-PLAN.md
+Last session: 2026-03-27T18:29:10.596Z
+Stopped At: Completed 03.2.1-07-PLAN.md
 
 ## Performance Metrics
 
@@ -83,3 +84,4 @@ Stopped At: Completed 03.2-03-PLAN.md
 |-------|------|----------|-------|-------|------|
 | 03.2 | 02 | 11min | 2 | 3 | 2026-03-26 |
 | Phase 03.2 P03 | 22min | 3 tasks | 4 files |
+| Phase 03.2.1 P07 | 5min | 5 tasks | 3 files |
