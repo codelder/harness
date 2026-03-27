@@ -1,3 +1,4 @@
+use rig::completion::Usage;
 use serde::{Deserialize, Serialize};
 
 /// Result of a single agent turn (user input + agent response)
@@ -15,6 +16,8 @@ pub struct AgentTurn {
     pub user_input: String,
     /// The agent's text response
     pub response: String,
+    /// Token usage from the LLM provider for this turn
+    pub usage: Option<Usage>,
 }
 
 /// Conversation role

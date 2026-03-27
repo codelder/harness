@@ -315,7 +315,7 @@ pub async fn agent_loop(
         .collect();
 
     let retry_hook = hook.clone();
-    let response = with_retry(
+    let (response_text, usage) = with_retry(
         MAX_RETRIES,
         || {
             let hook_clone = hook.clone();
@@ -343,7 +343,8 @@ pub async fn agent_loop(
 
     Ok(AgentTurn {
         user_input: current_input.to_string(),
-        response,
+        response: response_text,
+        usage,
     })
 }
 

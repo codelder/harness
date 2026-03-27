@@ -450,6 +450,7 @@ mod tests {
                         Ok(AgentTurn {
                             user_input: "hello".to_string(),
                             response: "world".to_string(),
+                            usage: None,
                         })
                     })
                 },
@@ -526,6 +527,7 @@ mod tests {
                         Ok(AgentTurn {
                             user_input: "status".to_string(),
                             response: "Working on it".to_string(),
+                            usage: None,
                         })
                     })
                 },
@@ -606,6 +608,7 @@ mod tests {
                         Ok(AgentTurn {
                             user_input: "status".to_string(),
                             response: "No change".to_string(),
+                            usage: None,
                         })
                     })
                 },

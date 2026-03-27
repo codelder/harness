@@ -108,8 +108,8 @@ impl LlmProvider {
 
     /// Send a chat message with history and a hook for observing tool calls
     ///
-    /// This method uses rig's PromptRequest API with hook support,
-    /// which is required for direct tool usage detection.
+    /// This method uses rig's PromptRequest API with hook support and
+    /// extended_details to capture token usage data.
     ///
     /// # Arguments
     /// * `prompt` - The prompt message to send
@@ -117,7 +117,7 @@ impl LlmProvider {
     /// * `hook` - Hook for observing tool calls and forwarding structured events
     ///
     /// # Returns
-    /// The LLM's response as a string
+    /// A tuple of (response text, optional token usage) from the LLM
     ///
     /// # Errors
     /// Returns PromptError if the request fails
@@ -126,20 +126,23 @@ impl LlmProvider {
         prompt: impl Into<String>,
         chat_history: Vec<Message>,
         hook: TodoUsageHook,
-    ) -> Result<String, PromptError> {
+    ) -> Result<(String, Option<rig::completion::Usage>), PromptError> {
         match self {
             LlmProvider::Anthropic(agent) => {
-                // Use PromptRequest with hook instead of agent.chat()
-                PromptRequest::from_agent(agent, prompt.into())
+                let response = PromptRequest::from_agent(agent, prompt.into())
                     .with_history(&mut chat_history.clone())
                     .with_hook(hook)
-                    .await
+                    .extended_details()
+                    .await?;
+                Ok((response.output, Some(response.total_usage)))
             }
             LlmProvider::Openai(agent) => {
-                PromptRequest::from_agent(agent, prompt.into())
+                let response = PromptRequest::from_agent(agent, prompt.into())
                     .with_history(&mut chat_history.clone())
                     .with_hook(hook)
-                    .await
+                    .extended_details()
+                    .await?;
+                Ok((response.output, Some(response.total_usage)))
             }
             LlmProvider::Ollama => {
                 Err(PromptError::CompletionError(
