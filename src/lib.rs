@@ -6,6 +6,7 @@ pub mod frontend;
 pub mod session;
 pub mod tools;
 pub mod planning;
+pub mod subagent;
 
 // Re-exports for convenience
 pub use error::{AgentError, ProviderError};
@@ -29,3 +30,4 @@ pub use frontend::{
 };
 pub use session::{SessionRuntime, SessionRuntimeConfig, SessionRuntimeOutcome, SessionSummary};
 pub use tools::BashTool;
+pub use subagent::{SubagentTool, SubagentConfig, SubagentError, TaskArgs};
