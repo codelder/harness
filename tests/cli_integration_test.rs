@@ -117,10 +117,9 @@ fn clean_exit_restore_smoke_without_live_terminal() {
         log,
         vec![
             "enable_raw_mode",
-            "enter_alternate_screen",
-            "create_terminal",
+            "create_inline_terminal",
+            "height_22",
             "show_cursor",
-            "leave_alternate_screen",
             "disable_raw_mode",
         ]
     );
@@ -137,11 +136,10 @@ fn runtime_error_restore_smoke_without_live_model_call() {
         log,
         vec![
             "enable_raw_mode",
-            "enter_alternate_screen",
-            "create_terminal",
+            "create_inline_terminal",
+            "height_22",
             "runtime_error",
             "show_cursor",
-            "leave_alternate_screen",
             "disable_raw_mode",
         ]
     );
