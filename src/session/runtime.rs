@@ -12,6 +12,26 @@ use std::sync::atomic::Ordering;
 use std::sync::Arc;
 use tokio::sync::Mutex;
 
+// Token Usage Investigation (Plan 3.2.1-07):
+// - rig-core version: 0.31.0
+// - Token usage available: YES
+// - rig-core exposes `completion::Usage` with fields:
+//   input_tokens: u64, output_tokens: u64, total_tokens: u64, cached_input_tokens: u64
+// - PromptResponse (returned by PromptRequest) has `total_usage: Usage`
+// - Anthropic and OpenAI completion response types both implement GetTokenUsage trait
+// - Token counts include multi-turn tool call accumulation
+//
+// However, wiring token usage through requires:
+// 1. Change LlmProvider::chat_with_history_and_hook() to return PromptResponse instead of String
+// 2. Change AgentTurn to carry Option<Usage> (or token fields)
+// 3. Change agent_loop to propagate usage data from PromptResponse
+// 4. SessionRuntime::submit_message_with executor signature needs Usage in TurnFuture
+// 5. Emit TokenUsage event from SessionRuntime after receiving AgentTurn with usage
+//
+// This is a non-trivial refactor touching provider.rs, loop_.rs, message.rs, and runtime.rs.
+// The statusline and protocol infrastructure are ready - only the emission plumbing remains.
+// Tracked for follow-up: wire token usage from rig-core through to FrontendEvent::TokenUsage.
+
 const SYSTEM_PROMPT: &str = "You are an AI agent with the ability to have a conversation. \
 Respond naturally to user messages.";
 const TODO_REMINDER: &str = "You have pending todos. Use the 'todo' tool to update your task list.";
