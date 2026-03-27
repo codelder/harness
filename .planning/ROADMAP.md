@@ -124,7 +124,7 @@ Plans:
 
 Plans:
 - [x] 04-01-PLAN.md -- Create SubagentTool module with rig Tool trait implementation
-- [ ] 04-02-PLAN.md -- Wire create_parent_provider(), update SessionRuntime, add unit tests
+- [x] 04-02-PLAN.md -- Wire create_parent_provider(), update SessionRuntime, add unit tests
 
 ### v1.0 Core (Planned)
 
