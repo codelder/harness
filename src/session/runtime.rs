@@ -12,26 +12,6 @@ use std::sync::atomic::Ordering;
 use std::sync::Arc;
 use tokio::sync::Mutex;
 
-// Token Usage Investigation (Plan 3.2.1-07):
-// - rig-core version: 0.31.0
-// - Token usage available: YES
-// - rig-core exposes `completion::Usage` with fields:
-//   input_tokens: u64, output_tokens: u64, total_tokens: u64, cached_input_tokens: u64
-// - PromptResponse (returned by PromptRequest) has `total_usage: Usage`
-// - Anthropic and OpenAI completion response types both implement GetTokenUsage trait
-// - Token counts include multi-turn tool call accumulation
-//
-// However, wiring token usage through requires:
-// 1. Change LlmProvider::chat_with_history_and_hook() to return PromptResponse instead of String
-// 2. Change AgentTurn to carry Option<Usage> (or token fields)
-// 3. Change agent_loop to propagate usage data from PromptResponse
-// 4. SessionRuntime::submit_message_with executor signature needs Usage in TurnFuture
-// 5. Emit TokenUsage event from SessionRuntime after receiving AgentTurn with usage
-//
-// This is a non-trivial refactor touching provider.rs, loop_.rs, message.rs, and runtime.rs.
-// The statusline and protocol infrastructure are ready - only the emission plumbing remains.
-// Tracked for follow-up: wire token usage from rig-core through to FrontendEvent::TokenUsage.
-
 const SYSTEM_PROMPT: &str = "You are an AI agent with the ability to have a conversation. \
 Respond naturally to user messages.";
 const TODO_REMINDER: &str = "You have pending todos. Use the 'todo' tool to update your task list.";
@@ -277,6 +257,19 @@ impl SessionRuntime {
             },
         )
         .await?;
+
+        if let Some(usage) = &turn.usage {
+            self.emit_event(
+                event_tx,
+                FrontendEvent::TokenUsage {
+                    turn_id,
+                    input_tokens: usage.input_tokens,
+                    output_tokens: usage.output_tokens,
+                    total_tokens: usage.total_tokens,
+                },
+            )
+            .await?;
+        }
 
         if let Some(ref message) = reminder {
             self.emit_event(
@@ -695,5 +688,72 @@ mod tests {
                 message: "Interrupt requested but not yet implemented".to_string(),
             })
         );
+    }
+
+    #[tokio::test]
+    async fn runtime_emits_token_usage_from_agent_turn() {
+        let (event_tx, mut event_rx) = frontend_event_channel(16);
+        let mut runtime = SessionRuntime::new();
+        runtime
+            .start_with_provider(LlmProvider::Ollama, "test", "model", &event_tx)
+            .await
+            .unwrap();
+
+        // Drain SessionStarted + initial TodoSnapshot
+        let _ = event_rx.recv().await;
+        let _ = event_rx.recv().await;
+
+        runtime
+            .submit_message_with(
+                "hello".to_string(),
+                &event_tx,
+                |_history, _input, _provider, _hook| {
+                    Box::pin(async {
+                        Ok(AgentTurn {
+                            user_input: "hello".to_string(),
+                            response: "world".to_string(),
+                            usage: Some(rig::completion::Usage::new()),
+                        })
+                    })
+                },
+            )
+            .await
+            .unwrap();
+
+        // Collect events from this turn
+        let mut saw_user_committed = false;
+        let mut saw_assistant_completed = false;
+        let mut saw_token_usage = false;
+
+        while let Ok(Some(event)) =
+            tokio::time::timeout(std::time::Duration::from_millis(50), event_rx.recv()).await
+        {
+            match event {
+                FrontendEvent::UserMessageCommitted { turn_id, text } => {
+                    assert_eq!(turn_id, 1);
+                    assert_eq!(text, "hello");
+                    saw_user_committed = true;
+                }
+                FrontendEvent::AssistantMessageCompleted { turn_id, text } => {
+                    assert_eq!(turn_id, 1);
+                    assert_eq!(text, "world");
+                    saw_assistant_completed = true;
+                }
+                FrontendEvent::TokenUsage {
+                    turn_id,
+                    input_tokens: _,
+                    output_tokens: _,
+                    total_tokens: _,
+                } => {
+                    assert_eq!(turn_id, 1);
+                    saw_token_usage = true;
+                }
+                _ => {}
+            }
+        }
+
+        assert!(saw_user_committed, "should see UserMessageCommitted");
+        assert!(saw_assistant_completed, "should see AssistantMessageCompleted");
+        assert!(saw_token_usage, "should see TokenUsage");
     }
 }
