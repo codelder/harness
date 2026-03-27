@@ -300,6 +300,7 @@ mod tests {
                 provider: "ollama".to_string(),
                 model: "test-model".to_string(),
                 working_directory: "/test".to_string(),
+                version: "0.1.0".to_string(),
             })
             .await
             .expect("session started should fit");

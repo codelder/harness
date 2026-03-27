@@ -15,5 +15,6 @@ pub use protocol::{
     FrontendSessionSummary,
     FrontendTodoItem,
     FrontendTodoStatus,
+    HARNESS_VERSION,
     SESSION_START_TURN_ID,
 };

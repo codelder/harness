@@ -6,7 +6,6 @@ use ratatui::layout::{Constraint, Direction, Layout, Rect};
 use ratatui::prelude::{Frame, Line};
 use ratatui::widgets::{Block, Borders, Paragraph, Wrap};
 
-const APP_BANNER: &str = "Harness";
 const SCROLL_STEP: u16 = 1;
 const PAGE_SCROLL_STEP: u16 = 8;
 
@@ -94,10 +93,12 @@ struct StreamingAssistant {
 pub struct CliApp {
     timeline: Vec<TimelineBlock>,
     todo_footer: Vec<FrontendTodoItem>,
+    todo_was_active: bool,
     composer: String,
     status: String,
     provider: Option<String>,
     model: Option<String>,
+    version: Option<String>,
     working_directory: Option<String>,
     viewport: ViewportState,
     streaming_assistant: Option<StreamingAssistant>,
@@ -112,10 +113,12 @@ impl CliApp {
         Self {
             timeline: Vec::new(),
             todo_footer: Vec::new(),
+            todo_was_active: false,
             composer: String::new(),
             status: "Starting session...".to_string(),
             provider: None,
             model: None,
+            version: None,
             working_directory: None,
             viewport: ViewportState::new(),
             streaming_assistant: None,
@@ -128,10 +131,11 @@ impl CliApp {
 
     pub fn apply_event(&mut self, event: FrontendEvent) {
         match event {
-            FrontendEvent::SessionStarted { provider, model, working_directory } => {
+            FrontendEvent::SessionStarted { provider, model, working_directory, version } => {
                 self.provider = Some(provider);
                 self.model = Some(model);
                 self.working_directory = Some(working_directory);
+                self.version = Some(version);
                 self.status = self.connection_label();
             }
             FrontendEvent::UserMessageCommitted { turn_id, text } => {
@@ -239,7 +243,36 @@ impl CliApp {
                 self.viewport.scroll_end();
             }
             FrontendEvent::TodoSnapshot { items, .. } => {
-                self.todo_footer = items;
+                let all_completed = !items.is_empty()
+                    && items.iter().all(|item| item.status == FrontendTodoStatus::Completed);
+                let was_showing = self.todo_was_active && !self.todo_footer.is_empty();
+
+                if all_completed && was_showing {
+                    // All todos just completed - add to timeline as history
+                    let summary: String = items
+                        .iter()
+                        .map(|item| format!("[x] #{} {}", item.id, item.text))
+                        .collect::<Vec<_>>()
+                        .join("\n");
+
+                    self.timeline.push(TimelineBlock::Note {
+                        turn_id: None,
+                        kind: NoteKind::Status,
+                        message: format!("Completed todos:\n{}", summary),
+                    });
+
+                    // Clear footer
+                    self.todo_footer = Vec::new();
+                    self.todo_was_active = false;
+                } else if all_completed {
+                    // Already completed, keep hidden
+                    self.todo_footer = items;
+                    self.todo_was_active = false;
+                } else {
+                    // Has active items - show in footer
+                    self.todo_was_active = !items.is_empty();
+                    self.todo_footer = items;
+                }
             }
             FrontendEvent::Status { message } => {
                 self.timeline.push(TimelineBlock::Note {
@@ -337,7 +370,11 @@ impl CliApp {
             .try_into()
             .expect("fixed layout");
 
-        let footer_text = self.todo_footer_text();
+        let footer_text = if self.should_show_todo_footer() {
+            self.todo_footer_text()
+        } else {
+            String::new()
+        };
         let footer_height = footer_height(&footer_text, display_area);
         let [timeline_area, footer_area] = Layout::default()
             .direction(Direction::Vertical)
@@ -355,7 +392,7 @@ impl CliApp {
             visible_lines_height(&timeline_lines, timeline_area.width, 0),
         );
 
-        let banner = Paragraph::new(APP_BANNER)
+        let banner = Paragraph::new(self.banner_text())
             .style(self.theme.banner);
         frame.render_widget(banner, banner_area);
 
@@ -393,6 +430,32 @@ impl CliApp {
     pub fn mark_exit_requested(&mut self) {
         self.exit_requested = true;
         self.status = "Exiting session...".to_string();
+    }
+
+    fn banner_text(&self) -> String {
+        let version = self.version.as_deref().unwrap_or("unknown");
+        let model = self.model.as_deref().unwrap_or("unknown");
+        let path = self.working_directory.as_deref().unwrap_or("unknown");
+
+        let max_path_len = 30;
+        let display_path = if path.len() > max_path_len {
+            format!("...{}", &path[path.len() - max_path_len + 3..])
+        } else {
+            path.to_string()
+        };
+
+        format!("Harness v{} | {} | {}", version, model, display_path)
+    }
+
+    fn should_show_todo_footer(&self) -> bool {
+        !self.todo_footer.is_empty()
+            && self
+                .todo_footer
+                .iter()
+                .any(|item| {
+                    item.status == FrontendTodoStatus::Pending
+                        || item.status == FrontendTodoStatus::InProgress
+                })
     }
 
     fn connection_label(&self) -> String {
@@ -711,7 +774,7 @@ mod tests {
     }
 
     #[test]
-    fn todo_snapshots_replace_footer_without_adding_timeline_rows() {
+    fn todo_auto_collapses_completed_items_into_timeline() {
         let mut app = CliApp::new();
         app.apply_event(FrontendEvent::UserMessageCommitted {
             turn_id: 1,
@@ -719,6 +782,7 @@ mod tests {
         });
         let timeline_len = app.timeline.len();
 
+        // First snapshot: pending todo shows in footer
         app.apply_event(FrontendEvent::TodoSnapshot {
             turn_id: 1,
             items: vec![FrontendTodoItem {
@@ -727,6 +791,10 @@ mod tests {
                 status: FrontendTodoStatus::Pending,
             }],
         });
+        assert!(app.should_show_todo_footer());
+        assert!(app.todo_was_active);
+
+        // Second snapshot: all completed - collapses into timeline
         app.apply_event(FrontendEvent::TodoSnapshot {
             turn_id: 1,
             items: vec![FrontendTodoItem {
@@ -736,9 +804,11 @@ mod tests {
             }],
         });
 
-        assert_eq!(app.timeline.len(), timeline_len);
-        assert_eq!(app.todo_footer.len(), 1);
-        assert_eq!(app.todo_footer[0].id, 2);
+        // Timeline grows by 1 (completed todos history entry)
+        assert_eq!(app.timeline.len(), timeline_len + 1);
+        // Footer is cleared
+        assert!(!app.should_show_todo_footer());
+        assert!(app.todo_footer.is_empty());
     }
 
     #[test]
@@ -795,7 +865,7 @@ mod tests {
         let buffer = render_buffer(&mut app, 40, 12);
         let lines = buffer_text(&buffer);
 
-        assert!(lines.iter().any(|line| line.contains(APP_BANNER)));
+        assert!(lines.iter().any(|line| line.contains("Harness")));
         let empty_state_row = lines
             .iter()
             .position(|line| line.contains("Start a conversation below."))
@@ -853,5 +923,62 @@ mod tests {
         let large_lines = buffer_text(&large_buffer);
         assert!(large_lines.iter().any(|line| line.contains("line 20")));
         assert!(app.viewport.follow_tail);
+    }
+
+    #[test]
+    fn todo_auto_collapses_when_all_completed() {
+        let mut app = CliApp::new();
+
+        // Add pending todo - should show in footer
+        app.apply_event(FrontendEvent::TodoSnapshot {
+            turn_id: 1,
+            items: vec![FrontendTodoItem {
+                id: 1,
+                text: "Task one".to_string(),
+                status: FrontendTodoStatus::Pending,
+            }],
+        });
+        assert!(app.should_show_todo_footer());
+        assert!(app.todo_was_active);
+
+        // Mark as completed - should hide footer and add to timeline
+        app.apply_event(FrontendEvent::TodoSnapshot {
+            turn_id: 1,
+            items: vec![FrontendTodoItem {
+                id: 1,
+                text: "Task one".to_string(),
+                status: FrontendTodoStatus::Completed,
+            }],
+        });
+
+        assert!(!app.should_show_todo_footer());
+        assert!(!app.todo_was_active);
+        assert!(app.timeline.iter().any(|block| {
+            matches!(block, TimelineBlock::Note { message, .. } if message.contains("Completed todos"))
+        }));
+    }
+
+    #[test]
+    fn todo_footer_shows_when_mixed_status() {
+        let mut app = CliApp::new();
+
+        // Mix of completed and pending - should still show
+        app.apply_event(FrontendEvent::TodoSnapshot {
+            turn_id: 1,
+            items: vec![
+                FrontendTodoItem {
+                    id: 1,
+                    text: "Done".to_string(),
+                    status: FrontendTodoStatus::Completed,
+                },
+                FrontendTodoItem {
+                    id: 2,
+                    text: "Pending".to_string(),
+                    status: FrontendTodoStatus::Pending,
+                },
+            ],
+        });
+
+        assert!(app.should_show_todo_footer());
     }
 }

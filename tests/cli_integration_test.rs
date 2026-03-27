@@ -40,7 +40,8 @@ async fn session_start_and_exit_emit_metadata_events() {
         Some(FrontendEvent::SessionStarted {
             provider,
             model,
-            working_directory,
+            working_directory: _,
+            version: _,
         }) if provider == "ollama" && model == "test-model"
     ));
     let mut saw_session_end = false;
