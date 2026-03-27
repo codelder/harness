@@ -120,7 +120,11 @@ Plans:
   3. Parent receives summarized results when child completes
   4. Child agent errors are handled gracefully without crashing parent
 
-**Plans**: TBD
+**Plans:** 2 plans in 2 waves
+
+Plans:
+- [ ] 04-01-PLAN.md -- Create SubagentTool module with rig Tool trait implementation
+- [ ] 04-02-PLAN.md -- Wire create_parent_provider(), update SessionRuntime, add unit tests
 
 ### v1.0 Core (Planned)
 
@@ -146,7 +150,7 @@ Plans:
 | 3.1 Code Review Fixes | v0.3 | 1/1 | Complete | 2026-03-24 |
 | 3.2 Terminal UI + Frontend Interface | v0.4 | 2/3 | Complete    | 2026-03-27 |
 | 3.2.1 TUI Alignment with Claude Code | v0.4 | 7/8 | Gap Closure | - |
-| 4. s04 - Subagents | v0.4 | 0/TBD | Not started | - |
+| 4. s04 - Subagents | v0.4 | 0/2 | Planning | - |
 | 5. s05 - Skills | v1.0 | 0/TBD | Not started | - |
 | 6. s06 - Context Compact | v1.0 | 0/TBD | Not started | - |
 | 7. s07 - Tasks | v1.0 | 0/TBD | Not started | - |
