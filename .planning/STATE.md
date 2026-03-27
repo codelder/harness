@@ -2,15 +2,15 @@
 gsd_state_version: 1.0
 milestone: v0.4
 milestone_name: Subagents
-status: Ready to plan
-stopped_at: Completed 03.2.1-08-PLAN.md
-last_updated: "2026-03-27T19:01:32.208Z"
-last_activity: 2026-03-27
+status: Executing Phase 04
+stopped_at: Completed 04-01-PLAN.md
+last_updated: "2026-03-28T04:30:00Z"
+last_activity: 2026-03-28
 progress:
   total_phases: 3
   completed_phases: 2
-  total_plans: 11
-  completed_plans: 11
+  total_plans: 14
+  completed_plans: 12
 ---
 
 # Project State
@@ -20,7 +20,7 @@ progress:
 See: .planning/PROJECT.md (updated 2026-03-24)
 
 **Core value:** Performance and safety without sacrificing capability
-**Current focus:** Phase 03.2.1 — tui-alignment-with-claude-code
+**Current focus:** Phase 04 — s04-subagents
 
 ## Milestone History
 
@@ -32,8 +32,8 @@ See: .planning/PROJECT.md (updated 2026-03-24)
 
 ## Current Position
 
-Phase: 03.2.1
-Plan: Not started
+Phase: 04 (s04-subagents) — EXECUTING
+Plan: 2 of 2
 
 ## Accumulated Context
 
@@ -64,6 +64,9 @@ Decisions are logged in PROJECT.md Key Decisions table.
 - [Phase 03.2]: Use source-included terminal smoke helpers in integration tests to verify restore behavior without a live TTY or model call.
 - [Phase 03.2.1]: Token usage data available in rig-core 0.31.0 via completion::Usage but wiring deferred - requires refactoring LlmProvider, AgentTurn, and agent_loop to propagate PromptResponse.total_usage
 - [Phase 03.2.1]: Use extended_details() on PromptRequest to get PromptResponse with total_usage for token tracking in agent pipeline
+- [Phase 04-01]: SubagentConfig holds provider configuration (not instance) to prevent recursion -- create_provider() only registers 7 base tools, parent's provider would include task tool
+- [Phase 04-01]: CHILD_SYSTEM_PROMPT defined but not yet wired -- will be used by create_parent_provider() in next plan
+- [Phase 04-01]: Max result length 10,000 chars (conservative vs Python reference's 50,000) for LLM context safety
 
 ### Pending Todos
 
@@ -75,9 +78,9 @@ None.
 
 ## Session Continuity
 
-Last activity: 2026-03-27
-Last session: 2026-03-27T18:55:39.222Z
-Stopped At: Completed 03.2.1-08-PLAN.md
+Last activity: 2026-03-28
+Last session: 2026-03-28T04:30:00Z
+Stopped At: Completed 04-01-PLAN.md
 
 ## Performance Metrics
 
@@ -87,3 +90,4 @@ Stopped At: Completed 03.2.1-08-PLAN.md
 | Phase 03.2 P03 | 22min | 3 tasks | 4 files |
 | Phase 03.2.1 P07 | 5min | 5 tasks | 3 files |
 | Phase 03.2.1 P08 | 4min | 2 tasks | 4 files |
+| 04 | 01 | 2min | 1 | 3 | 2026-03-28 |
