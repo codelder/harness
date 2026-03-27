@@ -474,16 +474,31 @@ impl CliApp {
     }
 
     fn status_line(&mut self) -> Line<'static> {
+        let token_info = if self.input_tokens > 0 || self.output_tokens > 0 {
+            format!("{} in / {} out | ", self.input_tokens, self.output_tokens)
+        } else {
+            String::new()
+        };
+
         let status = if self.streaming_assistant.is_some() {
-            // Show spinner during assistant activity
             self.spinner.status_text()
         } else {
             self.status.clone()
         };
-        Line::from(format!(
-            "{} | Enter submit | Ctrl+C interrupt | Esc exit | Scroll Up/Down PgUp/PgDn Home/End",
-            status
-        ))
+
+        if self.streaming_assistant.is_some() {
+            Line::from(format!(
+                "{}{} | Enter submit | Ctrl+C interrupt | Esc exit",
+                token_info,
+                status
+            ))
+        } else {
+            Line::from(format!(
+                "{}{} | Enter submit | Ctrl+C interrupt | Esc exit | Scroll Up/Down PgUp/PgDn Home/End",
+                token_info,
+                status
+            ))
+        }
     }
 
     fn composer_text(&self) -> String {
