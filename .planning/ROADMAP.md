@@ -47,7 +47,7 @@ See: [v0.3-ROADMAP.md](milestones/v0.3-ROADMAP.md)
 
 ### Inserted Work (Planned)
 
-- [ ] **Phase 3.2: Terminal UI and Frontend Interface Abstraction (INSERTED)** -- Replace the split-pane ratatui workbench with a single-column Claude Code-like terminal UI and repair the shared frontend protocol for future adapters
+- [x] **Phase 3.2: Terminal UI and Frontend Interface Abstraction (INSERTED)** -- Replace the split-pane ratatui workbench with a single-column Claude Code-like terminal UI and repair the shared frontend protocol for future adapters (completed 2026-03-27)
 - [ ] **Phase 3.2.1: TUI Alignment with Claude Code (INSERTED)** -- TUI alignment with Claude Code: Viewport::Inline, color system, Spinner animation, simplified message format, enhanced Banner/Todo/Statusline
 
 ### v0.4 Subagents (Planned)
@@ -96,7 +96,7 @@ Plans:
   6. Todo auto-collapse on completion + write to history
   7. Statusline shows token context
 
-**Plans:** 8 plans in 1 wave
+**Plans:** 3/3 plans complete
 
 Plans:
 - [x] 3.2.1-01-PLAN.md -- Switch to Inline Viewport mode
@@ -144,7 +144,7 @@ Plans:
 | 2. s02 - Tool Use | v0.2 | 3/3 | Complete | 2026-03-23 |
 | 3. s03 - TodoWrite | v0.3 | 4/4 | Complete | 2026-03-24 |
 | 3.1 Code Review Fixes | v0.3 | 1/1 | Complete | 2026-03-24 |
-| 3.2 Terminal UI + Frontend Interface | v0.4 | 2/3 | In Progress | - |
+| 3.2 Terminal UI + Frontend Interface | v0.4 | 2/3 | Complete    | 2026-03-27 |
 | 3.2.1 TUI Alignment with Claude Code | v0.4 | 7/8 | Gap Closure | - |
 | 4. s04 - Subagents | v0.4 | 0/TBD | Not started | - |
 | 5. s05 - Skills | v1.0 | 0/TBD | Not started | - |
