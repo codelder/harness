@@ -106,6 +106,8 @@ pub struct CliApp {
     exit_requested: bool,
     theme: CliTheme,
     spinner: Spinner,
+    input_tokens: u64,
+    output_tokens: u64,
 }
 
 impl CliApp {
@@ -126,6 +128,8 @@ impl CliApp {
             exit_requested: false,
             theme: CliTheme::default(),
             spinner: Spinner::new(),
+            input_tokens: 0,
+            output_tokens: 0,
         }
     }
 
@@ -242,8 +246,9 @@ impl CliApp {
                 });
                 self.viewport.scroll_end();
             }
-            FrontendEvent::TokenUsage { .. } => {
-                // Token tracking will be wired in Task 3
+            FrontendEvent::TokenUsage { input_tokens, output_tokens, .. } => {
+                self.input_tokens = input_tokens;
+                self.output_tokens = output_tokens;
             }
             FrontendEvent::TodoSnapshot { items, .. } => {
                 let all_completed = !items.is_empty()
