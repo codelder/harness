@@ -242,6 +242,9 @@ impl CliApp {
                 });
                 self.viewport.scroll_end();
             }
+            FrontendEvent::TokenUsage { .. } => {
+                // Token tracking will be wired in Task 3
+            }
             FrontendEvent::TodoSnapshot { items, .. } => {
                 let all_completed = !items.is_empty()
                     && items.iter().all(|item| item.status == FrontendTodoStatus::Completed);

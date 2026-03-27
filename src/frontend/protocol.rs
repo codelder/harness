@@ -111,6 +111,12 @@ pub enum FrontendEvent {
         turn_id: u64,
         items: Vec<FrontendTodoItem>,
     },
+    TokenUsage {
+        turn_id: u64,
+        input_tokens: u64,
+        output_tokens: u64,
+        total_tokens: u64,
+    },
     Status {
         message: String,
     },
@@ -128,7 +134,8 @@ impl FrontendEvent {
         match self {
             FrontendEvent::AssistantMessageDelta { .. }
             | FrontendEvent::Thinking { .. }
-            | FrontendEvent::Status { .. } => DeliveryMode::BestEffort,
+            | FrontendEvent::Status { .. }
+            | FrontendEvent::TokenUsage { .. } => DeliveryMode::BestEffort,
             FrontendEvent::SessionStarted { .. }
             | FrontendEvent::UserMessageCommitted { .. }
             | FrontendEvent::AssistantMessageCompleted { .. }
@@ -154,6 +161,7 @@ struct BestEffortBacklog {
     assistant_delta: Option<(u64, String)>,
     thinking: Option<(u64, String)>,
     status: Option<String>,
+    token_usage: Option<(u64, u64, u64, u64)>, // (turn_id, input, output, total)
 }
 
 impl BestEffortBacklog {
@@ -168,11 +176,28 @@ impl BestEffortBacklog {
             FrontendEvent::Status { message } => {
                 self.status = Some(message);
             }
+            FrontendEvent::TokenUsage {
+                turn_id,
+                input_tokens,
+                output_tokens,
+                total_tokens,
+            } => {
+                self.token_usage = Some((turn_id, input_tokens, output_tokens, total_tokens));
+            }
             _ => {}
         }
     }
 
     fn pop_next(&mut self) -> Option<FrontendEvent> {
+        if let Some((turn_id, input, output, total)) = self.token_usage.take() {
+            return Some(FrontendEvent::TokenUsage {
+                turn_id,
+                input_tokens: input,
+                output_tokens: output,
+                total_tokens: total,
+            });
+        }
+
         if let Some((turn_id, delta)) = self.assistant_delta.take() {
             return Some(FrontendEvent::AssistantMessageDelta { turn_id, delta });
         }
