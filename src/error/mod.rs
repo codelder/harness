@@ -1,6 +1,6 @@
 mod classify;
 
-pub use classify::{is_retryable, classify_prompt_error, AgentError, ProviderError};
+pub use classify::{classify_prompt_error, is_retryable, AgentError, ProviderError};
 
 /// Result type alias for agent operations
 pub type AgentResult<T> = Result<T, AgentError>;

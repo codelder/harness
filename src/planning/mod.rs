@@ -1,3 +1,3 @@
 pub mod todo;
 
-pub use todo::{TodoManager, TodoItem, TodoStatus, TodoError};
+pub use todo::{TodoError, TodoItem, TodoManager, TodoStatus};

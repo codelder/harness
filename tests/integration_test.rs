@@ -34,7 +34,9 @@ fn test_cli_welcome_message() {
     // Should show welcome message (or error about missing API key)
     let combined = format!("{}{}", stdout, stderr);
     assert!(
-        combined.contains("Agent Harness") || combined.contains("API key") || combined.contains("error"),
+        combined.contains("Agent Harness")
+            || combined.contains("API key")
+            || combined.contains("error"),
         "Expected welcome message or API key error, got: stdout='{}', stderr='{}'",
         stdout,
         stderr
@@ -86,7 +88,7 @@ fn test_stdin_eof_graceful_exit() {
     // Run with empty stdin (immediate EOF)
     let output = Command::new("./target/release/harness")
         .env("HARNESS_ANTHROPIC_KEY", "sk-test-dummy-key")
-        .stdin(Stdio::null())  // No input = immediate EOF
+        .stdin(Stdio::null()) // No input = immediate EOF
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
         .output()

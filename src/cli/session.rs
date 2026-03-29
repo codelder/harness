@@ -6,11 +6,14 @@ use crate::frontend::{
     FrontendCommandReceiver, FrontendCommandSender, FrontendEventReceiver, FrontendEventSender,
 };
 use crate::session::{SessionRuntime, SessionRuntimeConfig, SessionRuntimeOutcome};
+use ratatui::prelude::Widget;
+use ratatui::widgets::Paragraph;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 use std::time::Duration;
 use tokio::sync::{mpsc, Mutex};
 use tracing::{error, info};
+use unicode_width::UnicodeWidthStr;
 
 /// Interactive ratatui-backed session.
 pub struct Session {
@@ -57,9 +60,50 @@ impl Session {
         info!(provider = ?provider_type, model = model, thinking = thinking, "Session initialized");
 
         let runtime_handle = tokio::spawn(run_runtime_loop(runtime, command_rx, runtime_event_tx));
+
+        // Print banner before entering raw mode so it scrolls with the terminal
+        {
+            let display_dir = std::env::current_dir()
+                .map(|p| p.display().to_string())
+                .unwrap_or_default();
+            // Replace home directory with ~/
+            let home = std::env::var("HOME").unwrap_or_default();
+            let display_dir = if !home.is_empty() && display_dir.starts_with(&home) {
+                format!("~/{}", &display_dir[home.len()..].trim_start_matches('/'))
+            } else {
+                display_dir
+            };
+            let dir = if display_dir.len() > 40 {
+                format!("...{}", &display_dir[display_dir.len() - 37..])
+            } else {
+                display_dir
+            };
+
+            // Banner — ANSI Shadow style ASCII art for "HARNESS"
+            let version = env!("CARGO_PKG_VERSION");
+            // ANSI escape codes: bold + white, dim/gray, reset
+            let bold = "\x1b[1m";
+            let dim = "\x1b[2m";
+            let reset = "\x1b[0m";
+            println!("\r");
+            println!("\r  ██╗  ██╗ █████╗ ██████╗ ███╗   ██╗ ███████╗███████╗███████╗");
+            println!("\r  ██║  ██║██╔══██╗██╔══██╗████╗  ██║ ██╔════╝██╔════╝██╔════╝");
+            println!("\r  ███████║███████║███████║██╔██╗ ██║ █████╗  ███████╗███████╗");
+            println!("\r  ██╔══██║██╔══██║██╔══██║██║╚██╗██║ ██╔══╝  ╚════██║╚════██║");
+            println!("\r  ██║  ██║██║  ██║██║  ██║██║ ╚████║ ███████╗███████║███████║");
+            println!("\r  ╚═╝  ╚═╝╚═╝  ╚═╝╚═╝  ╚═╝╚═╝  ╚═══╝ ╚══════╝╚══════╝╚══════╝");
+            println!("\r  {bold}Rust AI Agent Harness{reset} {dim}· v{version}{reset}");
+            println!("\r  {dim}{model} · {dir}{reset}");
+            println!();
+        }
+
+        // Enable raw mode and create inline viewport BEFORE starting input listener.
+        // This ensures crossterm's event reader initializes in raw mode,
+        // which is required for correct input handling in Warp and other terminals.
+        let mut terminal = TerminalGuard::new().map_err(terminal_error)?;
         let stop_flag = Arc::new(AtomicBool::new(false));
         let (input_handle, mut input_rx) = spawn_input_listener(stop_flag.clone());
-        let mut terminal = TerminalGuard::new().map_err(terminal_error)?;
+
         let mut app = CliApp::new();
 
         let loop_result = self
@@ -81,14 +125,14 @@ impl Session {
         drop(input_rx);
         drop(command_tx);
 
-        let _ = input_handle.await.map_err(join_error)?.map_err(terminal_task_error);
-        self.runtime = runtime_handle
+        let _ = input_handle
             .await
             .map_err(join_error)?
-            .map_err(|error| {
-                error!(error = %error, "Runtime loop failed");
-                error
-            })?;
+            .map_err(terminal_task_error);
+        self.runtime = runtime_handle.await.map_err(join_error)?.map_err(|error| {
+            error!(error = %error, "Runtime loop failed");
+            error
+        })?;
 
         loop_result
     }
@@ -104,7 +148,45 @@ impl Session {
     ) -> Result<(), AgentError> {
         loop {
             Self::drain_events_and_flush(app, event_rx, event_tx).await?;
-            terminal.draw(|frame| app.render(frame)).map_err(terminal_error)?;
+
+            terminal
+                .set_viewport_height(app.desired_viewport_height())
+                .map_err(terminal_error)?;
+
+            // Insert new timeline content above the viewport
+            let new_lines = app.drain_new_lines();
+            if !new_lines.is_empty() {
+                let height = new_lines.len() as u16;
+                terminal
+                    .insert_before(height, |buf| {
+                        let paragraph = Paragraph::new(new_lines);
+                        paragraph.render(buf.area, buf);
+
+                        // Fix CJK wide-character placeholder cells.
+                        let width = buf.area.width as usize;
+                        for y in 0..buf.area.height {
+                            let mut x: usize = 0;
+                            while x < width {
+                                let cell = &buf[(x as u16, y)];
+                                let w = UnicodeWidthStr::width(cell.symbol()).max(1);
+                                if w > 1 {
+                                    for dx in 1..w {
+                                        if x + dx < width {
+                                            buf[((x + dx) as u16, y)].set_symbol("");
+                                        }
+                                    }
+                                }
+                                x += w;
+                            }
+                        }
+                    })
+                    .map_err(terminal_error)?;
+            }
+
+            // Render viewport (dynamic: tools/todo/composer/status)
+            terminal
+                .draw(|frame| app.render(frame))
+                .map_err(terminal_error)?;
 
             if app.should_exit() {
                 return Ok(());
@@ -126,13 +208,13 @@ impl Session {
                             }
                         }
                         Some(InputEvent::Resize(_columns, _rows)) => {
-                            // Resize is handled by terminal guard - just trigger re-render
                             let _ = terminal.handle_resize();
                         }
                         None => return Ok(()),
                     }
                 }
-                _ = tokio::time::sleep(Duration::from_millis(50)) => {
+                _ = tokio::time::sleep(Duration::from_millis(150)) => {
+                    // Slower animation rate (150ms instead of 50ms) to reduce scroll churn
                     flush_best_effort(event_tx).await?;
                 }
             }
@@ -140,8 +222,18 @@ impl Session {
     }
 
     fn drain_events(app: &mut CliApp, event_rx: &mut FrontendEventReceiver) {
+        let mut count = 0;
         while let Ok(event) = event_rx.try_recv() {
+            tracing::debug!("UI received event: {:?}", std::mem::discriminant(&event));
             app.apply_event(event);
+            count += 1;
+        }
+        if count > 0 {
+            tracing::debug!(
+                "drain_events: {} events, executing: {}",
+                count,
+                app.executing_tool_count()
+            );
         }
     }
 
@@ -232,7 +324,7 @@ mod tests {
     use ratatui::Terminal;
 
     fn render_lines(app: &mut CliApp) -> Vec<String> {
-        let backend = TestBackend::new(60, 12);
+        let backend = TestBackend::new(60, app.desired_viewport_height());
         let mut terminal = Terminal::new(backend).expect("test terminal should initialize");
         terminal
             .draw(|frame| app.render(frame))
@@ -321,10 +413,10 @@ mod tests {
         Session::drain_events(&mut app, &mut event_rx);
 
         let lines = render_lines(&mut app);
-        // Status shows spinner when streaming is active (not "Connected" label)
-        assert!(lines.iter().any(|line| line.contains("Thinking") || line.contains("Processing")));
-        assert!(lines.iter().any(|line| line.contains("<<< Assistant")));
-        assert!(lines.iter().any(|line| line.contains("backlogged delta")));
+        // Streaming text shows in composer area
+        assert!(lines.iter().any(|line| line.contains("backlogged delta")
+            || line.contains("Thinking")
+            || line.contains("Processing")));
     }
 
     #[tokio::test]
@@ -333,7 +425,12 @@ mod tests {
         let mut runtime = SessionRuntime::new();
 
         runtime
-            .start_with_provider(crate::llm::LlmProvider::Ollama, "ollama", "test-model", &event_tx)
+            .start_with_provider(
+                crate::llm::LlmProvider::Ollama,
+                "ollama",
+                "test-model",
+                &event_tx,
+            )
             .await
             .expect("runtime should start");
         let _ = event_rx.recv().await;

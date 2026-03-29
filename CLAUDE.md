@@ -11,6 +11,10 @@ A high-performance, memory-safe AI agent harness built in Rust. The project re-i
 Harness = Tools + Knowledge + Observation + Action Interfaces + Permissions
 ```
 
+## Language Preference
+
+When working on this project, please use Chinese (中文) for extended thinking.
+
 ## Architecture
 
 The system is built around a core agent loop with stop_reason branching:

@@ -1,7 +1,7 @@
-use rig::tool::Tool;
 use rig::completion::ToolDefinition;
-use serde::Deserialize;
+use rig::tool::Tool;
 use schemars::JsonSchema;
+use serde::Deserialize;
 use tokio::fs;
 
 /// Maximum output characters to prevent context explosion
@@ -47,7 +47,8 @@ Usage notes:
 - Supports offset and limit for reading partial files
 - By default, reads up to 2000 lines starting from the beginning
 - Large files are truncated to prevent context explosion
-"#.to_string(),
+"#
+            .to_string(),
             parameters: serde_json::to_value(schemars::schema_for!(ReadArgs))
                 .expect("Failed to generate schema for ReadArgs"),
         }
@@ -63,17 +64,16 @@ Usage notes:
         let offset = args.offset.unwrap_or(0);
         let limit = args.limit.unwrap_or(lines.len());
 
-        let selected: Vec<&str> = lines
-            .into_iter()
-            .skip(offset)
-            .take(limit)
-            .collect();
+        let selected: Vec<&str> = lines.into_iter().skip(offset).take(limit).collect();
 
         let mut result = selected.join("\n");
 
         // Truncate if too large
         if result.len() > MAX_OUTPUT_CHARS {
-            result = format!("{}... (truncated, file too large)", &result[..MAX_OUTPUT_CHARS]);
+            result = format!(
+                "{}... (truncated, file too large)",
+                &result[..MAX_OUTPUT_CHARS]
+            );
         }
 
         tracing::debug!("Read {} characters from file", result.len());

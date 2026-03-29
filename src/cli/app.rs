@@ -2,57 +2,17 @@ use crate::cli::spinner::Spinner;
 use crate::cli::theme::CliTheme;
 use crate::frontend::{FrontendCommand, FrontendEvent, FrontendTodoItem, FrontendTodoStatus};
 use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
-use ratatui::layout::{Constraint, Direction, Layout, Rect};
-use ratatui::prelude::{Frame, Line};
-use ratatui::widgets::{Block, Borders, Paragraph, Wrap};
+use ratatui::layout::{Constraint, Direction, Layout};
+use ratatui::prelude::{Frame, Line, Span};
+use ratatui::widgets::{Paragraph, Wrap};
+use serde::Deserialize;
+use the_other_tui_markdown::{into_text_with_renderer as render_markdown, RendererBuilder};
+use unicode_width::UnicodeWidthStr;
 
-const SCROLL_STEP: u16 = 1;
-const PAGE_SCROLL_STEP: u16 = 8;
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-struct ViewportState {
-    offset: u16,
-    follow_tail: bool,
-}
-
-impl ViewportState {
-    fn new() -> Self {
-        Self {
-            offset: 0,
-            follow_tail: true,
-        }
-    }
-
-    fn scroll_up(&mut self, lines: u16) {
-        self.offset = self.offset.saturating_sub(lines.max(1));
-        self.follow_tail = false;
-    }
-
-    fn scroll_down(&mut self, lines: u16) {
-        self.offset = self.offset.saturating_add(lines.max(1));
-        self.follow_tail = false;
-    }
-
-    fn scroll_home(&mut self) {
-        self.offset = 0;
-        self.follow_tail = false;
-    }
-
-    fn scroll_end(&mut self) {
-        self.follow_tail = true;
-    }
-
-    fn resolve(&mut self, max_scroll: u16) -> u16 {
-        let resolved = if self.follow_tail {
-            max_scroll
-        } else {
-            self.offset.min(max_scroll)
-        };
-        self.offset = resolved;
-        self.follow_tail = resolved >= max_scroll;
-        resolved
-    }
-}
+const TOOL_PANEL_MAX_ROWS: u16 = 2;
+const COMPOSER_ROWS: u16 = 3;
+const STATUS_ROWS: u16 = 1;
+const COMPOSER_PROMPT: &str = "> ";
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 struct ToolBlock {
@@ -61,6 +21,7 @@ struct ToolBlock {
     name: String,
     args_preview: String,
     result_preview: Option<String>,
+    is_error: bool,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -72,9 +33,18 @@ enum NoteKind {
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 enum TimelineBlock {
-    UserMessage { turn_id: u64, text: String },
-    AssistantMessage { turn_id: u64, text: String },
-    Thinking { turn_id: u64, text: String },
+    UserMessage {
+        turn_id: u64,
+        text: String,
+    },
+    AssistantMessage {
+        turn_id: u64,
+        text: String,
+    },
+    Thinking {
+        turn_id: u64,
+        text: String,
+    },
     Note {
         turn_id: Option<u64>,
         kind: NoteKind,
@@ -89,6 +59,12 @@ struct StreamingAssistant {
     text: String,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct MarkdownTable {
+    headers: Vec<String>,
+    rows: Vec<Vec<String>>,
+}
+
 /// Reducer-owned UI state for the terminal adapter.
 pub struct CliApp {
     timeline: Vec<TimelineBlock>,
@@ -100,14 +76,18 @@ pub struct CliApp {
     model: Option<String>,
     version: Option<String>,
     working_directory: Option<String>,
-    viewport: ViewportState,
     streaming_assistant: Option<StreamingAssistant>,
+    awaiting_assistant: bool,
     should_exit: bool,
     exit_requested: bool,
     theme: CliTheme,
     spinner: Spinner,
     input_tokens: u64,
     output_tokens: u64,
+    /// Index of the next timeline block to insert above the viewport.
+    last_inserted_index: usize,
+    /// Result lines for tool blocks that were already drained before their result arrived.
+    pending_tool_result_lines: Vec<Line<'static>>,
 }
 
 impl CliApp {
@@ -122,32 +102,40 @@ impl CliApp {
             model: None,
             version: None,
             working_directory: None,
-            viewport: ViewportState::new(),
             streaming_assistant: None,
+            awaiting_assistant: false,
             should_exit: false,
             exit_requested: false,
             theme: CliTheme::default(),
             spinner: Spinner::new(),
             input_tokens: 0,
             output_tokens: 0,
+            last_inserted_index: 0,
+            pending_tool_result_lines: Vec::new(),
         }
     }
 
     pub fn apply_event(&mut self, event: FrontendEvent) {
         match event {
-            FrontendEvent::SessionStarted { provider, model, working_directory, version } => {
+            FrontendEvent::SessionStarted {
+                provider,
+                model,
+                working_directory,
+                version,
+            } => {
                 self.provider = Some(provider);
-                self.model = Some(model);
-                self.working_directory = Some(working_directory);
-                self.version = Some(version);
+                self.model = Some(model.clone());
+                self.working_directory = Some(working_directory.clone());
+                self.version = Some(version.clone());
                 self.status = self.connection_label();
             }
             FrontendEvent::UserMessageCommitted { turn_id, text } => {
                 self.streaming_assistant = None;
+                self.awaiting_assistant = true;
+                self.spinner.reset();
                 self.timeline
                     .push(TimelineBlock::UserMessage { turn_id, text });
                 self.status = "Waiting for assistant...".to_string();
-                self.viewport.scroll_end();
             }
             FrontendEvent::AssistantMessageDelta { turn_id, delta } => {
                 if delta.is_empty() {
@@ -165,19 +153,18 @@ impl CliApp {
                         });
                     }
                 }
-                self.viewport.scroll_end();
             }
             FrontendEvent::AssistantMessageCompleted { turn_id, text } => {
                 self.streaming_assistant = None;
+                self.awaiting_assistant = false;
                 self.spinner.reset();
                 self.timeline
                     .push(TimelineBlock::AssistantMessage { turn_id, text });
                 self.status = self.connection_label();
-                self.viewport.scroll_end();
             }
             FrontendEvent::Thinking { turn_id, text } => {
-                self.timeline.push(TimelineBlock::Thinking { turn_id, text });
-                self.viewport.scroll_end();
+                self.timeline
+                    .push(TimelineBlock::Thinking { turn_id, text });
             }
             FrontendEvent::ToolCallStarted {
                 turn_id,
@@ -191,24 +178,43 @@ impl CliApp {
                     name,
                     args_preview,
                     result_preview: None,
+                    is_error: false,
                 }));
-                self.viewport.scroll_end();
             }
             FrontendEvent::ToolCallFinished {
                 turn_id,
                 call_id,
                 name,
                 result_preview,
+                is_error,
             } => {
-                if let Some(tool) = self.timeline.iter_mut().rev().find_map(|block| match block {
-                    TimelineBlock::Tool(tool)
-                        if tool.turn_id == turn_id && tool.call_id == call_id =>
-                    {
-                        Some(tool)
+                // Find matching tool block index
+                let found_index = self
+                    .timeline
+                    .iter()
+                    .rev()
+                    .position(|block| {
+                        matches!(block, TimelineBlock::Tool(t)
+                        if t.turn_id == turn_id && t.call_id == call_id)
+                    })
+                    .map(|rev_idx| self.timeline.len() - 1 - rev_idx);
+
+                if let Some(idx) = found_index {
+                    let was_drained = idx < self.last_inserted_index;
+                    // Update result in-place
+                    if let TimelineBlock::Tool(tool) = &mut self.timeline[idx] {
+                        tool.result_preview = Some(result_preview);
+                        tool.is_error = is_error;
                     }
-                    _ => None,
-                }) {
-                    tool.result_preview = Some(result_preview);
+                    // If already printed, queue result lines for next drain
+                    if was_drained {
+                        let tool_clone = match &self.timeline[idx] {
+                            TimelineBlock::Tool(t) => t.clone(),
+                            _ => unreachable!(),
+                        };
+                        let result_lines = self.tool_result_only_lines(&tool_clone);
+                        self.pending_tool_result_lines.extend(result_lines);
+                    }
                 } else {
                     self.timeline.push(TimelineBlock::Tool(ToolBlock {
                         turn_id,
@@ -216,9 +222,9 @@ impl CliApp {
                         name,
                         args_preview: String::new(),
                         result_preview: Some(result_preview),
+                        is_error,
                     }));
                 }
-                self.viewport.scroll_end();
             }
             FrontendEvent::RetryScheduled {
                 turn_id,
@@ -236,7 +242,6 @@ impl CliApp {
                     ),
                 });
                 self.status = "Retry scheduled...".to_string();
-                self.viewport.scroll_end();
             }
             FrontendEvent::Reminder { turn_id, message } => {
                 self.timeline.push(TimelineBlock::Note {
@@ -244,19 +249,23 @@ impl CliApp {
                     kind: NoteKind::Reminder,
                     message,
                 });
-                self.viewport.scroll_end();
             }
-            FrontendEvent::TokenUsage { input_tokens, output_tokens, .. } => {
+            FrontendEvent::TokenUsage {
+                input_tokens,
+                output_tokens,
+                ..
+            } => {
                 self.input_tokens = input_tokens;
                 self.output_tokens = output_tokens;
             }
             FrontendEvent::TodoSnapshot { items, .. } => {
                 let all_completed = !items.is_empty()
-                    && items.iter().all(|item| item.status == FrontendTodoStatus::Completed);
+                    && items
+                        .iter()
+                        .all(|item| item.status == FrontendTodoStatus::Completed);
                 let was_showing = self.todo_was_active && !self.todo_footer.is_empty();
 
                 if all_completed && was_showing {
-                    // All todos just completed - add to timeline as history
                     let summary: String = items
                         .iter()
                         .map(|item| format!("[x] #{} {}", item.id, item.text))
@@ -269,15 +278,12 @@ impl CliApp {
                         message: format!("Completed todos:\n{}", summary),
                     });
 
-                    // Clear footer
                     self.todo_footer = Vec::new();
                     self.todo_was_active = false;
                 } else if all_completed {
-                    // Already completed, keep hidden
                     self.todo_footer = items;
                     self.todo_was_active = false;
                 } else {
-                    // Has active items - show in footer
                     self.todo_was_active = !items.is_empty();
                     self.todo_footer = items;
                 }
@@ -289,7 +295,6 @@ impl CliApp {
                     message: message.clone(),
                 });
                 self.status = message;
-                self.viewport.scroll_end();
             }
             FrontendEvent::Error { turn_id, message } => {
                 self.timeline.push(TimelineBlock::Note {
@@ -298,7 +303,6 @@ impl CliApp {
                     message,
                 });
                 self.status = "Error".to_string();
-                self.viewport.scroll_end();
             }
             FrontendEvent::SessionEnded { summary } => {
                 self.status = format!(
@@ -310,35 +314,31 @@ impl CliApp {
         }
     }
 
+    /// Return new timeline blocks since last call as styled Lines, ready for
+    /// `terminal.insert_before()`.
+    pub fn drain_new_lines(&mut self) -> Vec<Line<'static>> {
+        let mut all_lines = std::mem::take(&mut self.pending_tool_result_lines);
+        let timeline_len = self.timeline.len();
+        while self.last_inserted_index < timeline_len {
+            let block = &self.timeline[self.last_inserted_index];
+            // Delay rendering tool blocks until they have a result.
+            // This ensures the green completion dot appears on the first line.
+            if let TimelineBlock::Tool(tool) = block {
+                if tool.result_preview.is_none() {
+                    break; // Stop here — wait for result before rendering
+                }
+            }
+            all_lines.extend(self.block_to_lines(block));
+            self.last_inserted_index += 1;
+        }
+        all_lines
+    }
+
     pub fn handle_key_event(&mut self, key: KeyEvent) -> Option<FrontendCommand> {
         match (key.code, key.modifiers) {
             (KeyCode::Esc, _) => Some(FrontendCommand::Exit),
             (KeyCode::Char('c'), modifiers) if modifiers.contains(KeyModifiers::CONTROL) => {
                 Some(FrontendCommand::Interrupt)
-            }
-            (KeyCode::Up, _) => {
-                self.viewport.scroll_up(SCROLL_STEP);
-                None
-            }
-            (KeyCode::Down, _) => {
-                self.viewport.scroll_down(SCROLL_STEP);
-                None
-            }
-            (KeyCode::PageUp, _) => {
-                self.viewport.scroll_up(PAGE_SCROLL_STEP);
-                None
-            }
-            (KeyCode::PageDown, _) => {
-                self.viewport.scroll_down(PAGE_SCROLL_STEP);
-                None
-            }
-            (KeyCode::Home, _) => {
-                self.viewport.scroll_home();
-                None
-            }
-            (KeyCode::End, _) => {
-                self.viewport.scroll_end();
-                None
             }
             (KeyCode::Enter, _) => {
                 let message = self.composer.trim().to_string();
@@ -364,65 +364,198 @@ impl CliApp {
         }
     }
 
-    pub fn render(&mut self, frame: &mut Frame) {
-        let [banner_area, display_area, composer_area, status_area] = Layout::default()
-            .direction(Direction::Vertical)
-            .constraints([
-                Constraint::Length(1),
-                Constraint::Min(0),
-                Constraint::Length(3),
-                Constraint::Length(1),
-            ])
-            .split(frame.area())
-            .as_ref()
-            .try_into()
-            .expect("fixed layout");
+    /// Number of tool blocks currently executing (no result yet).
+    pub fn executing_tool_count(&self) -> u16 {
+        self.timeline
+            .iter()
+            .filter(|block| {
+                matches!(
+                    block,
+                    TimelineBlock::Tool(ToolBlock {
+                        name,
+                        result_preview: None,
+                        ..
+                    }) if name != "todo"
+                )
+            })
+            .count() as u16
+    }
 
-        let footer_text = if self.should_show_todo_footer() {
-            self.todo_footer_text()
-        } else {
-            String::new()
-        };
-        let footer_height = footer_height(&footer_text, display_area);
-        let [timeline_area, footer_area] = Layout::default()
-            .direction(Direction::Vertical)
-            .constraints([Constraint::Min(0), Constraint::Length(footer_height)])
-            .split(display_area)
-            .as_ref()
-            .try_into()
-            .expect("display layout");
+    fn visible_tool_rows(&self) -> u16 {
+        self.executing_tool_count().min(TOOL_PANEL_MAX_ROWS)
+    }
 
-        let timeline_lines = self.timeline_lines();
-        let max_scroll = max_scroll_for_lines(&timeline_lines, timeline_area, 0);
-        let scroll = self.viewport.resolve(max_scroll);
-        let timeline_render_area = bottom_align_area(
-            timeline_area,
-            visible_lines_height(&timeline_lines, timeline_area.width, 0),
-        );
-
-        let banner = Paragraph::new(self.banner_text())
-            .style(self.theme.banner);
-        frame.render_widget(banner, banner_area);
-
-        let timeline = Paragraph::new(timeline_lines)
-            .scroll((scroll, 0))
-            .wrap(Wrap { trim: false });
-        frame.render_widget(timeline, timeline_render_area);
-
-        if footer_height > 0 {
-            let footer = Paragraph::new(footer_text)
-                .style(self.theme.footer)
-                .block(Block::default().title("Todo").borders(Borders::TOP))
-                .wrap(Wrap { trim: false });
-            frame.render_widget(footer, footer_area);
+    fn visible_todo_rows(&self) -> u16 {
+        if !self.should_show_todo_footer() {
+            return 0;
         }
 
-        let composer = Paragraph::new(self.composer_text())
-            .style(self.theme.composer)
-            .block(Block::default().borders(Borders::TOP))
+        1 + u16::try_from(self.todo_footer.len()).unwrap_or(u16::MAX.saturating_sub(1))
+    }
+
+    fn tool_todo_gap_rows(&self) -> u16 {
+        if self.visible_tool_rows() > 0 && self.visible_todo_rows() > 0 {
+            1
+        } else {
+            0
+        }
+    }
+
+    /// Desired viewport height: composer + status, plus only the rows currently needed
+    /// for executing tools and the pinned todo panel.
+    pub fn desired_viewport_height(&self) -> u16 {
+        COMPOSER_ROWS
+            + STATUS_ROWS
+            + self.visible_tool_rows()
+            + self.tool_todo_gap_rows()
+            + self.visible_todo_rows()
+    }
+
+    /// Render executing tools as stable viewport lines.
+    pub fn render_executing_tools_lines(&mut self, max_lines: usize) -> Vec<Line<'static>> {
+        // Collect executing tools info
+        let executing: Vec<(String, String)> = self
+            .timeline
+            .iter()
+            .filter_map(|block| match block {
+                TimelineBlock::Tool(t) if t.result_preview.is_none() && t.name != "todo" => {
+                    let args = if t.args_preview.is_empty() {
+                        String::new()
+                    } else {
+                        format!("({})", summarize_tool_args(&t.name, &t.args_preview, 40))
+                    };
+                    Some((capitalize_first(&t.name), args))
+                }
+                _ => None,
+            })
+            .take(max_lines)
+            .collect();
+
+        if executing.is_empty() {
+            return Vec::new();
+        }
+
+        let spinner_frame = self.spinner.frame();
+        let mut lines = Vec::new();
+
+        for (tool_name, args) in &executing {
+            lines.push(Line::from(vec![
+                Span::styled(
+                    format!("{} ", spinner_frame),
+                    self.theme.tool_executing_indicator,
+                ),
+                Span::styled(tool_name.clone(), self.theme.tool),
+                Span::styled(args.clone(), self.theme.tool_result),
+            ]));
+        }
+
+        lines
+    }
+
+    /// Render executing tools as ANSI escape sequence string.
+    /// Kept for experiments/debugging; the interactive UI renders these in-viewport.
+    /// Returns the number of lines rendered.
+    #[allow(dead_code)]
+    pub fn render_executing_tools_ansi(&mut self, width: u16) -> (String, u16) {
+        // Collect executing tools info first to avoid borrow issues
+        let executing: Vec<(String, String)> = self
+            .timeline
+            .iter()
+            .filter_map(|block| match block {
+                TimelineBlock::Tool(t) if t.result_preview.is_none() && t.name != "todo" => {
+                    let args = if t.args_preview.is_empty() {
+                        String::new()
+                    } else {
+                        format!("({})", summarize_tool_args(&t.name, &t.args_preview, 40))
+                    };
+                    Some((capitalize_first(&t.name), args))
+                }
+                _ => None,
+            })
+            .take(3)
+            .collect();
+
+        if executing.is_empty() {
+            return (String::new(), 0);
+        }
+
+        let spinner_frame = self.spinner.frame();
+        let mut output = String::new();
+
+        for (tool_name, args) in &executing {
+            // Use ANSI color codes matching the theme
+            // Dim gray for spinner, bright blue for tool name, default for args
+            let line = format!(
+                "\x1b[2m{}\x1b[0m \x1b[1;38;5;75m{}\x1b[0m\x1b[2m{}\x1b[0m",
+                spinner_frame, tool_name, args
+            );
+
+            // Pad to width and ensure proper line
+            let padded = format!("{:width$}", line, width = width as usize);
+            output.push_str(&padded);
+            output.push_str("\r\n");
+        }
+
+        let lines_count = executing.len() as u16;
+        (output, lines_count)
+    }
+}
+
+impl CliApp {
+    pub fn render(&mut self, frame: &mut Frame) {
+        let tool_rows = self.visible_tool_rows();
+        let gap_rows = self.tool_todo_gap_rows();
+        let todo_rows = self.visible_todo_rows();
+
+        let mut constraints = Vec::new();
+        if tool_rows > 0 {
+            constraints.push(Constraint::Length(tool_rows));
+        }
+        if gap_rows > 0 {
+            constraints.push(Constraint::Length(gap_rows));
+        }
+        if todo_rows > 0 {
+            constraints.push(Constraint::Length(todo_rows));
+        }
+        constraints.push(Constraint::Length(COMPOSER_ROWS));
+        constraints.push(Constraint::Length(STATUS_ROWS));
+
+        let areas = Layout::default()
+            .direction(Direction::Vertical)
+            .constraints(constraints)
+            .split(frame.area());
+
+        let mut area_index = 0;
+        if tool_rows > 0 {
+            let tool_area = areas[area_index];
+            let tool_lines = self.render_executing_tools_lines(tool_area.height as usize);
+            let tools = Paragraph::new(tool_lines).wrap(Wrap { trim: false });
+            frame.render_widget(tools, tool_area);
+            area_index += 1;
+        }
+
+        if gap_rows > 0 {
+            area_index += 1;
+        }
+
+        if todo_rows > 0 {
+            let todo_area = areas[area_index];
+            let todo_lines = self.render_todo_footer_lines(todo_area.height as usize);
+            let todos = Paragraph::new(todo_lines).wrap(Wrap { trim: false });
+            frame.render_widget(todos, todo_area);
+            area_index += 1;
+        }
+
+        let composer_area = areas[area_index];
+        let composer = Paragraph::new(self.render_composer_lines(composer_area.width))
             .wrap(Wrap { trim: false });
         frame.render_widget(composer, composer_area);
+        if self.streaming_assistant.is_none() && composer_area.height > 1 && composer_area.width > 0 {
+            frame.set_cursor_position(self.composer_cursor_position(composer_area));
+        }
 
+        // Status
+        let status_area = areas[area_index + 1];
         let status = Paragraph::new(self.status_line());
         frame.render_widget(status, status_area);
     }
@@ -440,32 +573,6 @@ impl CliApp {
         self.status = "Exiting session...".to_string();
     }
 
-    fn banner_text(&self) -> String {
-        let version = self.version.as_deref().unwrap_or("unknown");
-        let model = self.model.as_deref().unwrap_or("unknown");
-        let path = self.working_directory.as_deref().unwrap_or("unknown");
-
-        let max_path_len = 30;
-        let display_path = if path.len() > max_path_len {
-            format!("...{}", &path[path.len() - max_path_len + 3..])
-        } else {
-            path.to_string()
-        };
-
-        format!("Harness v{} | {} | {}", version, model, display_path)
-    }
-
-    fn should_show_todo_footer(&self) -> bool {
-        !self.todo_footer.is_empty()
-            && self
-                .todo_footer
-                .iter()
-                .any(|item| {
-                    item.status == FrontendTodoStatus::Pending
-                        || item.status == FrontendTodoStatus::InProgress
-                })
-    }
-
     fn connection_label(&self) -> String {
         match (&self.provider, &self.model) {
             (Some(provider), Some(model)) => format!("Connected: {} / {}", provider, model),
@@ -480,180 +587,567 @@ impl CliApp {
             String::new()
         };
 
-        let status = if self.streaming_assistant.is_some() {
+        let status = if self.awaiting_assistant || self.streaming_assistant.is_some() {
             self.spinner.status_text()
         } else {
             self.status.clone()
         };
 
-        if self.streaming_assistant.is_some() {
-            Line::from(format!(
-                "{}{} | Enter submit | Ctrl+C interrupt | Esc exit",
-                token_info,
-                status
-            ))
-        } else {
-            Line::from(format!(
-                "{}{} | Enter submit | Ctrl+C interrupt | Esc exit | Scroll Up/Down PgUp/PgDn Home/End",
-                token_info,
-                status
-            ))
-        }
+        Line::from(format!(
+            "{}{} | Enter submit | Ctrl+C interrupt | Esc exit",
+            token_info, status
+        ))
     }
 
-    fn composer_text(&self) -> String {
-        if self.composer.is_empty() {
-            "> Type a message...".to_string()
-        } else {
-            format!("> {}", self.composer)
+    fn render_composer_lines(&self, width: u16) -> Vec<Line<'static>> {
+        if width == 0 {
+            return Vec::new();
         }
+
+        let border = "─".repeat(width as usize);
+        let body = if let Some(streaming) = &self.streaming_assistant {
+            Line::from(vec![
+                Span::styled(COMPOSER_PROMPT, self.theme.composer_prompt),
+                Span::styled(streaming.text.clone(), self.theme.assistant),
+            ])
+        } else if self.composer.is_empty() {
+            Line::from(vec![
+                Span::styled(COMPOSER_PROMPT, self.theme.composer_prompt),
+                Span::styled(" ", self.theme.composer_cursor),
+            ])
+        } else {
+            Line::from(vec![
+                Span::styled(COMPOSER_PROMPT, self.theme.composer_prompt),
+                Span::styled(self.composer.clone(), self.theme.composer),
+                Span::styled(" ", self.theme.composer_cursor),
+            ])
+        };
+
+        vec![
+            Line::styled(border.clone(), self.theme.composer_border),
+            body,
+            Line::styled(border, self.theme.composer_border),
+        ]
     }
 
-    fn timeline_lines(&self) -> Vec<Line<'static>> {
-        let mut lines = Vec::new();
+    fn composer_cursor_position(&self, composer_area: ratatui::layout::Rect) -> (u16, u16) {
+        let prompt_width = UnicodeWidthStr::width(COMPOSER_PROMPT) as u16;
+        let text_width = UnicodeWidthStr::width(self.composer.as_str()) as u16;
+        let cursor_x = composer_area.x
+            + (prompt_width + text_width).min(composer_area.width.saturating_sub(1));
+        let cursor_y = composer_area.y + 1;
+        (cursor_x, cursor_y)
+    }
 
-        for block in &self.timeline {
-            match block {
-                TimelineBlock::UserMessage { text, .. } => {
-                    lines.push(Line::styled(">>> You", self.theme.user));
-                    for line in text.lines() {
-                        lines.push(Line::styled(line.to_string(), self.theme.user));
-                    }
-                    lines.push(Line::raw("")); // blank line
-                }
-                TimelineBlock::AssistantMessage { text, .. } => {
-                    lines.push(Line::styled("<<< Assistant", self.theme.assistant));
-                    for line in text.lines() {
-                        lines.push(Line::styled(line.to_string(), self.theme.assistant));
-                    }
-                    lines.push(Line::raw(""));
-                }
-                TimelineBlock::Thinking { text, .. } => {
-                    lines.push(Line::styled("... Thinking", self.theme.thinking));
-                    for line in text.lines() {
-                        lines.push(Line::styled(line.to_string(), self.theme.thinking));
-                    }
-                    lines.push(Line::raw(""));
-                }
-                TimelineBlock::Note { kind, message, .. } => {
-                    let (prefix, style) = match kind {
-                        NoteKind::Error => ("!! Error", self.theme.error),
-                        NoteKind::Reminder => ("! Reminder", self.theme.status),
-                        NoteKind::Status => ("* Status", self.theme.status),
-                    };
-                    lines.push(Line::styled(prefix, style));
-                    for line in message.lines() {
-                        lines.push(Line::styled(line.to_string(), style));
-                    }
-                    lines.push(Line::raw(""));
-                }
-                TimelineBlock::Tool(tool) => {
-                    lines.push(Line::styled(format!("[{}]", tool.name), self.theme.tool));
-                    if !tool.args_preview.is_empty() {
-                        lines.push(Line::styled(
-                            format!("  {}", tool.args_preview),
-                            self.theme.tool,
-                        ));
-                    }
-                    if let Some(result) = &tool.result_preview {
-                        lines.push(Line::styled(
-                            format!("  -> {}", result),
-                            self.theme.tool_result,
-                        ));
-                    }
-                    lines.push(Line::raw(""));
-                }
-            }
+    fn should_show_todo_footer(&self) -> bool {
+        self.todo_was_active && !self.todo_footer.is_empty()
+    }
+
+    fn render_todo_footer_lines(&self, max_lines: usize) -> Vec<Line<'static>> {
+        if !self.should_show_todo_footer() || max_lines == 0 {
+            return Vec::new();
         }
 
-        // Handle streaming assistant
-        if let Some(streaming) = &self.streaming_assistant {
-            lines.push(Line::styled("<<< Assistant", self.theme.assistant));
-            for line in streaming.text.lines() {
-                lines.push(Line::styled(line.to_string(), self.theme.assistant));
-            }
-        }
+        let completed = self
+            .todo_footer
+            .iter()
+            .filter(|item| item.status == FrontendTodoStatus::Completed)
+            .count();
+        let total = self.todo_footer.len();
 
-        if lines.is_empty() {
-            lines.push(Line::raw("Start a conversation below."));
+        let mut lines = vec![Line::styled(
+            format!("Tasks ({completed}/{total})"),
+            self.theme.footer,
+        )];
+
+        let item_rows = max_lines.saturating_sub(1);
+        for item in self.todo_footer.iter().take(item_rows) {
+            lines.push(Line::styled(
+                format!("  {}", format_todo_item(item)),
+                self.theme.footer,
+            ));
         }
 
         lines
     }
 
-    fn todo_footer_text(&self) -> String {
-        if self.todo_footer.is_empty() {
-            return String::new();
+    fn block_to_lines(&self, block: &TimelineBlock) -> Vec<Line<'static>> {
+        match block {
+            TimelineBlock::UserMessage { text, .. } => {
+                let mut lines = Vec::new();
+                for line in text.lines() {
+                    lines.push(Line::from(vec![
+                        Span::styled("> ", self.theme.user_prompt),
+                        Span::styled(format!(" {} ", line), self.theme.user),
+                    ]));
+                }
+                lines.push(Line::raw(""));
+                lines
+            }
+            TimelineBlock::AssistantMessage { text, .. } => {
+                let mut lines = self.render_assistant_markdown(text);
+                lines.push(Line::raw(""));
+                lines
+            }
+            TimelineBlock::Thinking { text, .. } => {
+                let mut lines = vec![Line::raw("")];
+                lines.push(Line::styled(
+                    "\u{2234} Thinking".to_string(),
+                    self.theme.thinking,
+                ));
+                lines.push(Line::raw(""));
+                for line in text.lines() {
+                    lines.push(Line::styled(format!("  {}", line), self.theme.thinking));
+                }
+                lines.push(Line::raw(""));
+                lines
+            }
+            TimelineBlock::Note { kind, message, .. } => {
+                let style = match kind {
+                    NoteKind::Error => self.theme.error,
+                    NoteKind::Reminder => self.theme.status,
+                    NoteKind::Status => self.theme.status,
+                };
+                let mut lines = Vec::new();
+                let mut first = true;
+                for line in message.lines() {
+                    if first {
+                        lines.push(Line::styled(format!("\u{25cf} {}", line), style));
+                        first = false;
+                    } else {
+                        lines.push(Line::styled(format!("  {}", line), style));
+                    }
+                }
+                lines.push(Line::raw(""));
+                lines
+            }
+            TimelineBlock::Tool(tool) => self.tool_to_lines(tool),
+        }
+    }
+
+    fn render_assistant_markdown(&self, text: &str) -> Vec<Line<'static>> {
+        let renderer = RendererBuilder::new()
+            .with_heading(|_level, spans| vec![Line::from(spans)])
+            .build();
+        let source_lines: Vec<&str> = text.lines().collect();
+        let mut rendered = Vec::new();
+        let mut markdown_chunk = Vec::new();
+        let mut index = 0;
+
+        while index < source_lines.len() {
+            if let Some((table, consumed)) = parse_markdown_table(&source_lines[index..]) {
+                if !markdown_chunk.is_empty() {
+                    rendered.extend(render_markdown(&markdown_chunk.join("\n"), &renderer).lines);
+                    markdown_chunk.clear();
+                }
+                rendered.extend(self.render_table_block(&table));
+                index += consumed;
+                continue;
+            }
+
+            markdown_chunk.push(source_lines[index].to_string());
+            index += 1;
         }
 
-        let mut lines = self
-            .todo_footer
-            .iter()
-            .map(|item| format!("{} #{} {}", todo_marker(item.status), item.id, item.text))
-            .collect::<Vec<_>>();
-        let done = self
-            .todo_footer
-            .iter()
-            .filter(|item| item.status == FrontendTodoStatus::Completed)
-            .count();
-        lines.push(String::new());
-        lines.push(format!("({}/{})", done, self.todo_footer.len()));
-        lines.join("\n")
+        if !markdown_chunk.is_empty() {
+            rendered.extend(render_markdown(&markdown_chunk.join("\n"), &renderer).lines);
+        }
+
+        rendered
     }
+
+    fn render_table_block(&self, table: &MarkdownTable) -> Vec<Line<'static>> {
+        let mut widths = vec![0usize; table.headers.len()];
+        for (index, cell) in table.headers.iter().enumerate() {
+            widths[index] = widths[index].max(UnicodeWidthStr::width(cell.as_str()));
+        }
+        for row in &table.rows {
+            for (index, cell) in row.iter().enumerate() {
+                widths[index] = widths[index].max(UnicodeWidthStr::width(cell.as_str()));
+            }
+        }
+
+        let mut lines = Vec::new();
+        lines.push(self.render_table_border(&widths, '┌', '┬', '┐'));
+        lines.push(self.render_table_row(&table.headers, &widths, self.theme.table_header));
+        lines.push(self.render_table_border(&widths, '├', '┼', '┤'));
+
+        for (index, row) in table.rows.iter().enumerate() {
+            lines.push(self.render_table_row(row, &widths, self.theme.table_cell));
+            if index + 1 < table.rows.len() {
+                lines.push(self.render_table_border(&widths, '├', '┼', '┤'));
+            }
+        }
+
+        lines.push(self.render_table_border(&widths, '└', '┴', '┘'));
+        lines
+    }
+
+    fn render_table_border(
+        &self,
+        widths: &[usize],
+        left: char,
+        middle: char,
+        right: char,
+    ) -> Line<'static> {
+        let mut text = String::new();
+        text.push(left);
+        for (index, width) in widths.iter().enumerate() {
+            text.push_str(&"─".repeat(width + 2));
+            text.push(if index + 1 < widths.len() { middle } else { right });
+        }
+        Line::styled(text, self.theme.table_border)
+    }
+
+    fn render_table_row(
+        &self,
+        row: &[String],
+        widths: &[usize],
+        text_style: ratatui::style::Style,
+    ) -> Line<'static> {
+        let mut spans = Vec::new();
+        spans.push(Span::styled("│", self.theme.table_border));
+
+        for (index, cell) in row.iter().enumerate() {
+            let cell_width = UnicodeWidthStr::width(cell.as_str());
+            let padding = widths[index].saturating_sub(cell_width);
+            spans.push(Span::styled(
+                format!(" {}{} ", cell, " ".repeat(padding)),
+                text_style,
+            ));
+            spans.push(Span::styled("│", self.theme.table_border));
+        }
+
+        Line::from(spans)
+    }
+
+    fn tool_to_lines(&self, tool: &ToolBlock) -> Vec<Line<'static>> {
+        if tool.name == "todo" {
+            return Vec::new();
+        }
+
+        let mut lines = vec![Line::raw("")];
+        let tool_name = capitalize_first(&tool.name);
+        if tool.name == "read" {
+            let file_path = serde_json::from_str::<serde_json::Value>(&tool.args_preview)
+                .ok()
+                .and_then(|v| {
+                    v.get("file_path")
+                        .and_then(|f| f.as_str())
+                        .map(String::from)
+                })
+                .unwrap_or_else(|| tool.args_preview.clone());
+
+            let is_err = tool.is_error;
+            let (indicator_char, indicator_style) = if is_err {
+                ("\u{25cf}", self.theme.error)
+            } else if tool.result_preview.is_none() {
+                ("\u{25cf}", self.theme.tool_executing_indicator)
+            } else {
+                ("\u{25cf}", self.theme.tool_indicator)
+            };
+            lines.push(Line::from(vec![
+                Span::styled(format!("{} ", indicator_char), indicator_style),
+                Span::styled(tool_name, self.theme.tool),
+                Span::styled(format!("({})", file_path), self.theme.tool_result),
+            ]));
+
+            if let Some(result) = &tool.result_preview {
+                let line_count = result.lines().count();
+                let is_err = tool.is_error;
+                if is_err {
+                    // Error result — show in red
+                    for line in result.lines() {
+                        lines.push(Line::from(vec![
+                            Span::styled("  \u{2514} ", self.theme.error),
+                            Span::styled(line.to_string(), self.theme.error),
+                        ]));
+                    }
+                } else if line_count <= 2 {
+                    // Short result — show actual content
+                    for line in result.lines() {
+                        lines.push(Line::from(vec![
+                            Span::styled("  \u{2514} ", self.theme.tool_result),
+                            Span::styled(line.to_string(), self.theme.tool_result),
+                        ]));
+                    }
+                } else {
+                    lines.push(Line::from(vec![
+                        Span::styled("  \u{2514} ", self.theme.tool_result),
+                        Span::styled("Read ", self.theme.tool_result),
+                        Span::styled(format!("{}", line_count), self.theme.tool_result_highlight),
+                        Span::styled(" lines", self.theme.tool_result),
+                    ]));
+                }
+            }
+        } else {
+            let args_display = if tool.args_preview.is_empty() {
+                String::new()
+            } else {
+                format!(
+                    "({})",
+                    summarize_tool_args(&tool.name, &tool.args_preview, 80)
+                )
+            };
+            let is_err = tool.is_error;
+            let (indicator_char, indicator_style) = if is_err {
+                ("\u{25cf}", self.theme.error)
+            } else if tool.result_preview.is_none() {
+                ("\u{25cf}", self.theme.tool_executing_indicator)
+            } else {
+                ("\u{25cf}", self.theme.tool_indicator)
+            };
+            lines.push(Line::from(vec![
+                Span::styled(format!("{} ", indicator_char), indicator_style),
+                Span::styled(tool_name, self.theme.tool),
+                Span::styled(args_display, self.theme.tool_result),
+            ]));
+            if let Some(result) = &tool.result_preview {
+                let result_style = if tool.is_error {
+                    self.theme.error
+                } else {
+                    self.theme.tool_result
+                };
+                for (i, line) in result.lines().enumerate() {
+                    if i == 0 {
+                        lines.push(Line::from(vec![
+                            Span::styled("  \u{2514} ", result_style),
+                            Span::styled(line.to_string(), result_style),
+                        ]));
+                    } else {
+                        lines.push(Line::styled(format!("    {}", line), result_style));
+                    }
+                }
+            }
+        }
+        // Only add trailing blank when result is present (complete block).
+        // If result arrives later, tool_result_only_lines adds the trailing blank.
+        if tool.result_preview.is_some() {
+            lines.push(Line::raw(""));
+        }
+        lines
+    }
+    fn tool_result_only_lines(&self, tool: &ToolBlock) -> Vec<Line<'static>> {
+        if tool.name == "todo" {
+            return Vec::new();
+        }
+
+        let mut lines = Vec::new();
+        if let Some(result) = &tool.result_preview {
+            // Completion indicator: green dot for success, red for error
+            let completion_style = if tool.is_error {
+                self.theme.error
+            } else {
+                self.theme.tool_indicator
+            };
+            if tool.name == "read" {
+                let line_count = result.lines().count();
+                if line_count <= 2 {
+                    for line in result.lines() {
+                        lines.push(Line::from(vec![
+                            Span::styled("  \u{25cf} ", completion_style),
+                            Span::styled(line.to_string(), self.theme.tool_result),
+                        ]));
+                    }
+                } else {
+                    lines.push(Line::from(vec![
+                        Span::styled("  \u{25cf} ", completion_style),
+                        Span::styled("Read ", self.theme.tool_result),
+                        Span::styled(format!("{}", line_count), self.theme.tool_result_highlight),
+                        Span::styled(" lines", self.theme.tool_result),
+                    ]));
+                }
+            } else {
+                let result_style = if tool.is_error {
+                    self.theme.error
+                } else {
+                    self.theme.tool_result
+                };
+                for (i, line) in result.lines().enumerate() {
+                    if i == 0 {
+                        lines.push(Line::from(vec![
+                            Span::styled("  \u{25cf} ", completion_style),
+                            Span::styled(line.to_string(), result_style),
+                        ]));
+                    } else {
+                        lines.push(Line::styled(format!("    {}", line), result_style));
+                    }
+                }
+            }
+            lines.push(Line::raw(""));
+        }
+        lines
+    }
+}
+
+/// Detect whether a tool result looks like an error message.
+
+fn capitalize_first(s: &str) -> String {
+    let mut chars = s.chars();
+    match chars.next() {
+        Some(c) => c.to_uppercase().collect::<String>() + chars.as_str(),
+        None => String::new(),
+    }
+}
+
+fn truncate_str(s: &str, max: usize) -> String {
+    if s.len() <= max {
+        return s.to_string();
+    }
+    let end = s.floor_char_boundary(max.saturating_sub(3));
+    format!("{}...", &s[..end])
+}
+
+#[derive(Debug, Deserialize)]
+struct TodoArgsPreview {
+    items: Vec<TodoItemPreview>,
+}
+
+#[derive(Debug, Deserialize)]
+struct TodoItemPreview {
+    id: u32,
+    text: String,
+    status: TodoStatusPreview,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "snake_case")]
+enum TodoStatusPreview {
+    Pending,
+    InProgress,
+    Completed,
+}
+
+fn summarize_tool_args(tool_name: &str, args: &str, max: usize) -> String {
+    let summary = match tool_name {
+        "todo" => summarize_todo_args(args),
+        _ => args.to_string(),
+    };
+    truncate_str(&summary, max)
+}
+
+fn summarize_todo_args(args: &str) -> String {
+    let Ok(todo) = serde_json::from_str::<TodoArgsPreview>(args) else {
+        return args.to_string();
+    };
+
+    if todo.items.is_empty() {
+        return "0 items".to_string();
+    }
+
+    let mut parts = todo
+        .items
+        .iter()
+        .take(2)
+        .map(|item| {
+            format!(
+                "#{} {} {}",
+                item.id,
+                todo_status_label(&item.status),
+                item.text.trim()
+            )
+        })
+        .collect::<Vec<_>>();
+
+    if todo.items.len() > 2 {
+        parts.push(format!("+{} more", todo.items.len() - 2));
+    }
+
+    format!(
+        "{} item{}: {}",
+        todo.items.len(),
+        if todo.items.len() == 1 { "" } else { "s" },
+        parts.join("; ")
+    )
+}
+
+fn todo_status_label(status: &TodoStatusPreview) -> &'static str {
+    match status {
+        TodoStatusPreview::Pending => "pending",
+        TodoStatusPreview::InProgress => "in progress",
+        TodoStatusPreview::Completed => "done",
+    }
+}
+
+fn format_todo_item(item: &FrontendTodoItem) -> String {
+    let status = match item.status {
+        FrontendTodoStatus::Pending => "[ ]",
+        FrontendTodoStatus::InProgress => "[>]",
+        FrontendTodoStatus::Completed => "[x]",
+    };
+    format!("{status} #{}: {}", item.id, item.text)
+}
+
+fn parse_markdown_table(lines: &[&str]) -> Option<(MarkdownTable, usize)> {
+    if lines.len() < 2 {
+        return None;
+    }
+
+    let headers = parse_table_row(lines[0])?;
+    if !is_table_delimiter(lines[1], headers.len()) {
+        return None;
+    }
+
+    let mut rows = Vec::new();
+    let mut consumed = 2;
+    while let Some(line) = lines.get(consumed) {
+        if line.trim().is_empty() {
+            break;
+        }
+
+        let Some(row) = parse_table_row(line) else {
+            break;
+        };
+        if row.len() != headers.len() {
+            break;
+        }
+        rows.push(row);
+        consumed += 1;
+    }
+
+    Some((MarkdownTable { headers, rows }, consumed))
+}
+
+fn parse_table_row(line: &str) -> Option<Vec<String>> {
+    let trimmed = line.trim();
+    if !trimmed.contains('|') {
+        return None;
+    }
+
+    let trimmed = trimmed
+        .strip_prefix('|')
+        .unwrap_or(trimmed)
+        .strip_suffix('|')
+        .unwrap_or(trimmed);
+    let cells: Vec<String> = trimmed.split('|').map(|cell| cell.trim().to_string()).collect();
+    if cells.len() < 2 || cells.iter().any(|cell| cell.is_empty()) {
+        return None;
+    }
+    Some(cells)
+}
+
+fn is_table_delimiter(line: &str, expected_columns: usize) -> bool {
+    let trimmed = line.trim();
+    let trimmed = trimmed
+        .strip_prefix('|')
+        .unwrap_or(trimmed)
+        .strip_suffix('|')
+        .unwrap_or(trimmed);
+    let cells: Vec<&str> = trimmed.split('|').map(str::trim).collect();
+    if cells.len() != expected_columns {
+        return false;
+    }
+
+    cells.iter().all(|cell| {
+        let cell = cell.trim_matches(':');
+        cell.len() >= 3 && cell.chars().all(|ch| ch == '-')
+    })
 }
 
 impl Default for CliApp {
     fn default() -> Self {
         Self::new()
     }
-}
-
-
-fn todo_marker(status: FrontendTodoStatus) -> &'static str {
-    match status {
-        FrontendTodoStatus::Pending => "[ ]",
-        FrontendTodoStatus::InProgress => "[>]",
-        FrontendTodoStatus::Completed => "[x]",
-    }
-}
-
-fn bottom_align_area(area: Rect, content_height: u16) -> Rect {
-    if content_height == 0 || content_height >= area.height {
-        area
-    } else {
-        Rect {
-            x: area.x,
-            y: area.y + area.height - content_height,
-            width: area.width,
-            height: content_height,
-        }
-    }
-}
-
-fn footer_height(text: &str, _area: Rect) -> u16 {
-    if text.is_empty() {
-        0
-    } else {
-        // Estimate height based on line count + borders
-        let line_count = text.lines().count() as u16;
-        line_count.saturating_add(2) // +2 for title and padding
-    }
-}
-
-fn max_scroll_for_lines(lines: &[Line], area: Rect, vertical_chrome: u16) -> u16 {
-    let visible_height = area.height.saturating_sub(vertical_chrome);
-    if visible_height == 0 {
-        return 0;
-    }
-
-    let line_count = lines.len() as u16;
-    line_count.saturating_sub(visible_height)
-}
-
-fn visible_lines_height(lines: &[Line], _width: u16, vertical_chrome: u16) -> u16 {
-    // Estimate line count based on content width
-    let line_count = lines.len() as u16;
-    line_count.saturating_add(vertical_chrome)
 }
 
 #[cfg(test)]
@@ -696,6 +1190,7 @@ mod tests {
             call_id: "read-1".to_string(),
             name: "read".to_string(),
             result_preview: "ok".to_string(),
+            is_error: false,
         });
         app.apply_event(FrontendEvent::TodoSnapshot {
             turn_id: 1,
@@ -739,15 +1234,16 @@ mod tests {
             call_id: "b".to_string(),
             name: "grep".to_string(),
             result_preview: "second".to_string(),
+            is_error: false,
         });
         app.apply_event(FrontendEvent::ToolCallFinished {
             turn_id: 2,
             call_id: "a".to_string(),
             name: "read".to_string(),
             result_preview: "first".to_string(),
+            is_error: false,
         });
 
-        // Check timeline blocks directly for correct tool state
         let read_tool = app.timeline.iter().find_map(|block| match block {
             TimelineBlock::Tool(t) if t.call_id == "a" => Some(t),
             _ => None,
@@ -779,6 +1275,7 @@ mod tests {
             call_id: "same".to_string(),
             name: "read".to_string(),
             result_preview: "turn-4-result".to_string(),
+            is_error: false,
         });
 
         let first = match &app.timeline[0] {
@@ -805,7 +1302,6 @@ mod tests {
         });
         let timeline_len = app.timeline.len();
 
-        // First snapshot: pending todo shows in footer
         app.apply_event(FrontendEvent::TodoSnapshot {
             turn_id: 1,
             items: vec![FrontendTodoItem {
@@ -814,10 +1310,8 @@ mod tests {
                 status: FrontendTodoStatus::Pending,
             }],
         });
-        assert!(app.should_show_todo_footer());
         assert!(app.todo_was_active);
 
-        // Second snapshot: all completed - collapses into timeline
         app.apply_event(FrontendEvent::TodoSnapshot {
             turn_id: 1,
             items: vec![FrontendTodoItem {
@@ -827,10 +1321,7 @@ mod tests {
             }],
         });
 
-        // Timeline grows by 1 (completed todos history entry)
         assert_eq!(app.timeline.len(), timeline_len + 1);
-        // Footer is cleared
-        assert!(!app.should_show_todo_footer());
         assert!(app.todo_footer.is_empty());
     }
 
@@ -883,25 +1374,162 @@ mod tests {
     }
 
     #[test]
-    fn render_keeps_empty_state_close_to_composer() {
+    fn render_shows_composer_and_status() {
         let mut app = CliApp::new();
-        let buffer = render_buffer(&mut app, 40, 12);
+        let height = app.desired_viewport_height();
+        let buffer = render_buffer(&mut app, 40, height);
         let lines = buffer_text(&buffer);
 
-        assert!(lines.iter().any(|line| line.contains("Harness")));
-        let empty_state_row = lines
-            .iter()
-            .position(|line| line.contains("Start a conversation below."))
-            .expect("empty state should render");
-        let composer_row = lines
-            .iter()
-            .position(|line| line.contains("> Type a message..."))
-            .expect("composer should render");
-        assert!(composer_row.saturating_sub(empty_state_row) <= 3);
+        assert!(lines.iter().any(|line| line.contains("> ")));
+        assert!(lines.iter().any(|line| line.contains("Starting session")));
     }
 
     #[test]
-    fn render_keeps_todo_footer_at_bottom() {
+    fn render_shows_streaming_text_in_composer_area() {
+        let mut app = CliApp::new();
+        app.apply_event(FrontendEvent::AssistantMessageDelta {
+            turn_id: 1,
+            delta: "hello world".to_string(),
+        });
+
+        let height = app.desired_viewport_height();
+        let buffer = render_buffer(&mut app, 40, height);
+        let lines = buffer_text(&buffer);
+
+        assert!(lines.iter().any(|line| line.contains("hello world")));
+    }
+
+    #[test]
+    fn waiting_for_assistant_shows_spinner_status() {
+        let mut app = CliApp::new();
+        app.apply_event(FrontendEvent::UserMessageCommitted {
+            turn_id: 1,
+            text: "hello".to_string(),
+        });
+
+        let status = app.status_line().to_string();
+        assert!(crate::cli::spinner::FUN_MESSAGES
+            .iter()
+            .any(|message| status.contains(message)));
+    }
+
+    #[test]
+    fn render_shows_executing_tools_in_viewport() {
+        let mut app = CliApp::new();
+        app.apply_event(FrontendEvent::ToolCallStarted {
+            turn_id: 1,
+            call_id: "bash-1".to_string(),
+            name: "bash".to_string(),
+            args_preview: "{\"command\":\"cargo test\"}".to_string(),
+        });
+
+        let height = app.desired_viewport_height();
+        let buffer = render_buffer(&mut app, 60, height);
+        let lines = buffer_text(&buffer);
+
+        assert!(lines.iter().any(|line| line.contains("Bash")));
+        assert!(lines.iter().any(|line| line.contains("cargo test")));
+        assert!(lines.iter().any(|line| line.contains("> ")));
+    }
+
+    #[test]
+    fn assistant_markdown_tables_render_without_raw_rule_row() {
+        let mut app = CliApp::new();
+        app.apply_event(FrontendEvent::AssistantMessageCompleted {
+            turn_id: 1,
+            text: "| Name | Value |\n| --- | --- |\n| Alpha | 1 |\n| Beta | 22 |".to_string(),
+        });
+
+        let lines = app.drain_new_lines();
+        let rendered: Vec<String> = lines
+            .iter()
+            .map(|line| {
+                line.spans
+                    .iter()
+                    .map(|span| span.content.as_ref())
+                    .collect()
+            })
+            .collect();
+
+        assert!(rendered.iter().any(|line| line.contains("Name")));
+        assert!(rendered.iter().any(|line| line.contains("Alpha")));
+        assert!(rendered.iter().any(|line| line.contains("Beta")));
+        assert!(rendered.iter().any(|line| line.contains('┌')));
+        assert!(rendered.iter().any(|line| line.contains('│')));
+        assert!(rendered.iter().any(|line| line.contains('┼')));
+        assert!(rendered.iter().any(|line| line.contains('┘')));
+        assert!(!rendered.iter().any(|line| line.contains("| Alpha | 1 |")));
+    }
+
+    #[test]
+    fn assistant_markdown_headings_render_without_hash_prefix() {
+        let mut app = CliApp::new();
+        app.apply_event(FrontendEvent::AssistantMessageCompleted {
+            turn_id: 1,
+            text: "# Main Title".to_string(),
+        });
+
+        let lines = app.drain_new_lines();
+        let rendered: Vec<String> = lines
+            .iter()
+            .map(|line| {
+                line.spans
+                    .iter()
+                    .map(|span| span.content.as_ref())
+                    .collect()
+            })
+            .collect();
+
+        assert!(rendered.iter().any(|line| line.contains("Main Title")));
+        assert!(!rendered.iter().any(|line| line.contains("# Main Title")));
+    }
+
+    #[test]
+    fn summarize_todo_args_produces_human_readable_summary() {
+        let summary = summarize_todo_args(
+            r#"{"items":[{"id":1,"text":"Write tests","status":"pending"},{"id":2,"text":"Fix UI","status":"in_progress"},{"id":3,"text":"Ship","status":"completed"}]}"#,
+        );
+
+        assert!(summary.contains("3 items:"));
+        assert!(summary.contains("Write tests"));
+        assert!(!summary.contains(r#"{"items":"#));
+    }
+
+    #[test]
+    fn todo_tool_does_not_render_as_scrolling_history_block() {
+        let mut app = CliApp::new();
+        app.apply_event(FrontendEvent::ToolCallStarted {
+            turn_id: 1,
+            call_id: "todo-1".to_string(),
+            name: "todo".to_string(),
+            args_preview: r#"{"items":[{"id":1,"text":"Pinned footer","status":"in_progress"}]}"#
+                .to_string(),
+        });
+        app.apply_event(FrontendEvent::ToolCallFinished {
+            turn_id: 1,
+            call_id: "todo-1".to_string(),
+            name: "todo".to_string(),
+            result_preview: "[>] #1: Pinned footer".to_string(),
+            is_error: false,
+        });
+
+        let lines = app.drain_new_lines();
+        let rendered: Vec<String> = lines
+            .iter()
+            .map(|line| {
+                line.spans
+                    .iter()
+                    .map(|span| span.content.as_ref())
+                    .collect()
+            })
+            .collect();
+
+        assert!(!rendered.iter().any(|line| line.contains("Todo(")));
+        assert!(!rendered.iter().any(|line| line.contains("Pinned footer")));
+    }
+
+    #[test]
+    fn render_viewport_shows_pinned_todo_footer() {
         let mut app = CliApp::new();
         app.apply_event(FrontendEvent::TodoSnapshot {
             turn_id: 1,
@@ -912,47 +1540,126 @@ mod tests {
             }],
         });
 
-        let buffer = render_buffer(&mut app, 40, 14);
+        let height = app.desired_viewport_height();
+        let buffer = render_buffer(&mut app, 40, height);
         let lines = buffer_text(&buffer);
-        let footer_row = lines
-            .iter()
-            .position(|line| line.contains("Pinned footer"))
-            .expect("footer text should render");
-        let composer_row = lines
-            .iter()
-            .position(|line| line.contains("> Type a message..."))
-            .expect("composer should render");
-
-        assert!(footer_row < composer_row);
+        assert!(lines.iter().any(|line| line.contains("Pinned footer")));
+        assert!(lines.iter().any(|line| line.contains("Tasks (0/1)")));
+        assert!(lines.iter().any(|line| line.contains("> ")));
     }
 
     #[test]
-    fn overflow_and_resize_clamp_viewport() {
+    fn render_keeps_tools_panel_above_todo_when_both_visible() {
         let mut app = CliApp::new();
-        for turn_id in 1..=20 {
-            app.apply_event(FrontendEvent::AssistantMessageCompleted {
-                turn_id,
-                text: format!("line {turn_id}"),
-            });
-        }
+        app.apply_event(FrontendEvent::TodoSnapshot {
+            turn_id: 1,
+            items: vec![FrontendTodoItem {
+                id: 1,
+                text: "Pinned footer".to_string(),
+                status: FrontendTodoStatus::InProgress,
+            }],
+        });
+        app.apply_event(FrontendEvent::ToolCallStarted {
+            turn_id: 1,
+            call_id: "bash-1".to_string(),
+            name: "bash".to_string(),
+            args_preview: "{\"command\":\"cargo test\"}".to_string(),
+        });
 
-        app.viewport.scroll_home();
-        let small_buffer = render_buffer(&mut app, 30, 8);
-        let small_lines = buffer_text(&small_buffer);
-        assert!(small_lines.iter().any(|line| line.contains("line 1")));
+        let height = app.desired_viewport_height();
+        let buffer = render_buffer(&mut app, 60, height);
+        let lines = buffer_text(&buffer);
 
-        app.viewport.scroll_end();
-        let large_buffer = render_buffer(&mut app, 30, 14);
-        let large_lines = buffer_text(&large_buffer);
-        assert!(large_lines.iter().any(|line| line.contains("line 20")));
-        assert!(app.viewport.follow_tail);
+        assert!(lines[0].contains("Bash"));
+        assert!(lines[0].contains("cargo test"));
+        assert!(lines[1].trim().is_empty());
+        assert!(lines[2].contains("Tasks (0/1)"));
+        assert!(lines[3].contains("Pinned footer"));
+        assert!(lines[5..8].iter().any(|line| line.contains("> ")));
+    }
+
+    #[test]
+    fn desired_viewport_height_grows_only_for_visible_panels() {
+        let mut app = CliApp::new();
+        assert_eq!(app.desired_viewport_height(), 4);
+
+        app.apply_event(FrontendEvent::ToolCallStarted {
+            turn_id: 1,
+            call_id: "bash-1".to_string(),
+            name: "bash".to_string(),
+            args_preview: "{\"command\":\"cargo test\"}".to_string(),
+        });
+        assert_eq!(app.desired_viewport_height(), 5);
+
+        app.apply_event(FrontendEvent::TodoSnapshot {
+            turn_id: 1,
+            items: vec![FrontendTodoItem {
+                id: 1,
+                text: "Pinned footer".to_string(),
+                status: FrontendTodoStatus::InProgress,
+            }],
+        });
+        assert_eq!(app.desired_viewport_height(), 8);
+    }
+
+    #[test]
+    fn render_todo_footer_shows_all_items_without_fold() {
+        let mut app = CliApp::new();
+        app.apply_event(FrontendEvent::TodoSnapshot {
+            turn_id: 1,
+            items: vec![
+                FrontendTodoItem {
+                    id: 1,
+                    text: "One".to_string(),
+                    status: FrontendTodoStatus::Pending,
+                },
+                FrontendTodoItem {
+                    id: 2,
+                    text: "Two".to_string(),
+                    status: FrontendTodoStatus::InProgress,
+                },
+                FrontendTodoItem {
+                    id: 3,
+                    text: "Three".to_string(),
+                    status: FrontendTodoStatus::Completed,
+                },
+            ],
+        });
+
+        let height = app.desired_viewport_height();
+        let buffer = render_buffer(&mut app, 40, height);
+        let lines = buffer_text(&buffer);
+
+        assert!(lines.iter().any(|line| line.contains("One")));
+        assert!(lines.iter().any(|line| line.contains("Two")));
+        assert!(lines.iter().any(|line| line.contains("Three")));
+        assert!(!lines.iter().any(|line| line.contains("+1 more")));
+    }
+
+    #[test]
+    fn drain_new_lines_returns_timeline_blocks_as_styled_lines() {
+        let mut app = CliApp::new();
+        app.apply_event(FrontendEvent::UserMessageCommitted {
+            turn_id: 1,
+            text: "hello".to_string(),
+        });
+
+        let lines = app.drain_new_lines();
+        assert!(!lines.is_empty());
+        // Should contain "> hello" and an empty line
+        assert!(lines
+            .iter()
+            .any(|l| { l.spans.iter().any(|s| s.content.contains("hello")) }));
+
+        // Second call returns nothing
+        let lines2 = app.drain_new_lines();
+        assert!(lines2.is_empty());
     }
 
     #[test]
     fn todo_auto_collapses_when_all_completed() {
         let mut app = CliApp::new();
 
-        // Add pending todo - should show in footer
         app.apply_event(FrontendEvent::TodoSnapshot {
             turn_id: 1,
             items: vec![FrontendTodoItem {
@@ -961,10 +1668,8 @@ mod tests {
                 status: FrontendTodoStatus::Pending,
             }],
         });
-        assert!(app.should_show_todo_footer());
         assert!(app.todo_was_active);
 
-        // Mark as completed - should hide footer and add to timeline
         app.apply_event(FrontendEvent::TodoSnapshot {
             turn_id: 1,
             items: vec![FrontendTodoItem {
@@ -974,7 +1679,6 @@ mod tests {
             }],
         });
 
-        assert!(!app.should_show_todo_footer());
         assert!(!app.todo_was_active);
         assert!(app.timeline.iter().any(|block| {
             matches!(block, TimelineBlock::Note { message, .. } if message.contains("Completed todos"))
@@ -985,7 +1689,6 @@ mod tests {
     fn todo_footer_shows_when_mixed_status() {
         let mut app = CliApp::new();
 
-        // Mix of completed and pending - should still show
         app.apply_event(FrontendEvent::TodoSnapshot {
             turn_id: 1,
             items: vec![
@@ -1002,6 +1705,50 @@ mod tests {
             ],
         });
 
-        assert!(app.should_show_todo_footer());
+        assert!(app.todo_was_active);
+    }
+
+    #[test]
+    fn tool_call_error_status_is_updated_correctly() {
+        let mut app = CliApp::new();
+
+        // Start a tool call
+        app.apply_event(FrontendEvent::ToolCallStarted {
+            turn_id: 1,
+            call_id: "read-error-1".to_string(),
+            name: "read".to_string(),
+            args_preview: "/nonexistent/file.txt".to_string(),
+        });
+
+        // Verify initial state (is_error should be false)
+        let tool = match &app.timeline[0] {
+            TimelineBlock::Tool(t) => t,
+            other => panic!("expected tool block, got {other:?}"),
+        };
+        assert_eq!(tool.is_error, false, "is_error should be false initially");
+
+        // Finish with an error
+        app.apply_event(FrontendEvent::ToolCallFinished {
+            turn_id: 1,
+            call_id: "read-error-1".to_string(),
+            name: "read".to_string(),
+            result_preview: "Failed to read file: No such file or directory (os error 2)"
+                .to_string(),
+            is_error: true,
+        });
+
+        // Verify is_error was updated to true
+        let tool = match &app.timeline[0] {
+            TimelineBlock::Tool(t) => t,
+            other => panic!("expected tool block, got {other:?}"),
+        };
+        assert_eq!(
+            tool.is_error, true,
+            "is_error should be updated to true when tool fails"
+        );
+        assert_eq!(
+            tool.result_preview.as_deref(),
+            Some("Failed to read file: No such file or directory (os error 2)")
+        );
     }
 }

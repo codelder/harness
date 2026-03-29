@@ -1,10 +1,10 @@
-use rig::tool::Tool;
 use rig::completion::ToolDefinition;
-use serde::{Deserialize, Serialize};
+use rig::tool::Tool;
 use schemars::JsonSchema;
-use tokio::process::Command;
+use serde::{Deserialize, Serialize};
+use std::process::Stdio;
 use std::time::Duration;
-
+use tokio::process::Command;
 /// Arguments for the Bash tool
 #[derive(Debug, Clone, Deserialize, JsonSchema)]
 pub struct BashArgs {
@@ -35,6 +35,29 @@ pub enum BashError {
     Blocked(String),
 }
 
+/// Maximum output size (characters). Truncate beyond this to avoid sending
+/// huge payloads to the LLM.
+const MAX_OUTPUT_SIZE: usize = 50_000;
+
+/// Truncate output to MAX_OUTPUT_SIZE, appending a summary if truncated.
+fn truncate_output(output: &str) -> String {
+    if output.len() <= MAX_OUTPUT_SIZE {
+        return output.to_string();
+    }
+    let truncated = &output[..output
+        .floor_char_boundary(MAX_OUTPUT_SIZE)
+        .min(MAX_OUTPUT_SIZE)];
+    let total_lines = output.lines().count();
+    let kept_lines = truncated.lines().count();
+    format!(
+        "{}\n\n... [{} of {} lines shown, {} bytes truncated]",
+        truncated,
+        kept_lines,
+        total_lines,
+        output.len() - truncated.len()
+    )
+}
+
 /// Bash tool for executing shell commands
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct BashTool;
@@ -57,14 +80,19 @@ Usage notes:
 - Commands run in the current working directory
 - Output includes both stdout and stderr
 - Use timeout for long-running commands (default: 30 seconds)
-"#.to_string(),
+"#
+            .to_string(),
             parameters: serde_json::to_value(schemars::schema_for!(BashArgs))
                 .expect("Failed to generate schema for BashArgs"),
         }
     }
 
     async fn call(&self, args: Self::Args) -> Result<Self::Output, Self::Error> {
-        tracing::info!("Executing bash command: {} (timeout: {}s)", args.command, args.timeout);
+        tracing::info!(
+            "Executing bash command: {} (timeout: {}s)",
+            args.command,
+            args.timeout
+        );
 
         // Safety blacklist check
         let dangerous_patterns = [
@@ -82,20 +110,22 @@ Usage notes:
 
         for pattern in &dangerous_patterns {
             if args.command.contains(pattern) {
-                return Err(BashError::Blocked(
-                    format!("contains '{}'. This operation requires explicit user confirmation.", pattern)
-                ));
+                return Err(BashError::Blocked(format!(
+                    "contains '{}'. This operation requires explicit user confirmation.",
+                    pattern
+                )));
             }
         }
 
-        // Execute with timeout
+        // Execute with timeout.
+        // stdin is set to null to prevent the child from inheriting the parent's
+        // raw-mode stdin, which can cause hangs (e.g. crossterm and the child
+        // both reading from the same fd).
         let mut cmd = Command::new("bash");
         cmd.arg("-c").arg(&args.command);
+        cmd.stdin(Stdio::null());
 
-        let result = tokio::time::timeout(
-            Duration::from_secs(args.timeout),
-            cmd.output()
-        ).await;
+        let result = tokio::time::timeout(Duration::from_secs(args.timeout), cmd.output()).await;
 
         let output = match result {
             Ok(Ok(output)) => output,
@@ -106,31 +136,40 @@ Usage notes:
         let stdout = String::from_utf8_lossy(&output.stdout);
         let stderr = String::from_utf8_lossy(&output.stderr);
 
+        let combined = if !stdout.is_empty() && !stderr.is_empty() {
+            format!("{}\n{}", stdout.trim(), stderr.trim())
+        } else if !stdout.is_empty() {
+            stdout.trim().to_string()
+        } else if !stderr.is_empty() {
+            stderr.trim().to_string()
+        } else {
+            String::new()
+        };
+
         let result = if output.status.success() {
-            if stdout.is_empty() && stderr.is_empty() {
+            if combined.is_empty() {
                 "Command completed successfully (no output)".to_string()
-            } else if stdout.is_empty() {
-                format!("stderr: {}", stderr.trim())
             } else {
-                stdout.trim().to_string()
+                truncate_output(&combined)
             }
         } else {
+            let truncated = truncate_output(&combined);
             match output.status.code() {
                 Some(code) => {
-                    let mut msg = format!("Command failed with exit code {}", code);
-                    if !stdout.is_empty() {
-                        msg.push_str(&format!("\nstdout: {}", stdout.trim()));
-                    }
-                    if !stderr.is_empty() {
-                        msg.push_str(&format!("\nstderr: {}", stderr.trim()));
-                    }
-                    msg
+                    return Err(BashError::ExecutionFailed(format!(
+                        "exit code {}: {}",
+                        code, truncated
+                    )));
                 }
                 None => return Err(BashError::Terminated),
             }
         };
 
-        tracing::debug!("Command output: {}", result);
+        tracing::debug!(
+            "Command output ({} bytes): {}",
+            result.len(),
+            &result[..result.len().min(200)]
+        );
         Ok(result)
     }
 }
@@ -168,8 +207,12 @@ mod tests {
             command: "exit 1".to_string(),
             timeout: 10,
         };
-        let result = tool.call(args).await.unwrap();
-        assert!(result.contains("exit code 1"));
+        let result = tool.call(args).await;
+        assert!(result.is_err());
+        match result.unwrap_err() {
+            BashError::ExecutionFailed(msg) => assert!(msg.contains("exit code 1")),
+            other => panic!("Expected ExecutionFailed, got {:?}", other),
+        }
     }
 
     #[tokio::test]

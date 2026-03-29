@@ -1,11 +1,6 @@
 use harness::{
-    frontend_event_channel,
-    FrontendCommand,
-    FrontendEvent,
-    FrontendSessionSummary,
-    LlmProvider,
-    SessionRuntime,
-    SessionRuntimeOutcome,
+    frontend_event_channel, FrontendCommand, FrontendEvent, FrontendSessionSummary, LlmProvider,
+    SessionRuntime, SessionRuntimeOutcome,
 };
 use std::process::Command;
 
@@ -118,7 +113,7 @@ fn clean_exit_restore_smoke_without_live_terminal() {
         vec![
             "enable_raw_mode",
             "create_inline_terminal",
-            "height_22",
+            "height_4",
             "show_cursor",
             "disable_raw_mode",
         ]
@@ -137,7 +132,7 @@ fn runtime_error_restore_smoke_without_live_model_call() {
         vec![
             "enable_raw_mode",
             "create_inline_terminal",
-            "height_22",
+            "height_4",
             "runtime_error",
             "show_cursor",
             "disable_raw_mode",

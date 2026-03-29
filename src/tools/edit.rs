@@ -1,7 +1,7 @@
-use rig::tool::Tool;
 use rig::completion::ToolDefinition;
-use serde::Deserialize;
+use rig::tool::Tool;
 use schemars::JsonSchema;
+use serde::Deserialize;
 use tokio::fs;
 
 /// Arguments for the Edit tool
@@ -50,7 +50,8 @@ Usage notes:
 - Fails if old_string appears multiple times (returns MultipleMatches error)
 - Use this tool for exact, single replacements
 - For multiple replacements, call this tool multiple times with unique context
-"#.to_string(),
+"#
+            .to_string(),
             parameters: serde_json::to_value(schemars::schema_for!(EditArgs))
                 .expect("Failed to generate schema for EditArgs"),
         }
@@ -150,6 +151,8 @@ mod tests {
         let tool = EditTool;
         let definition = tool.definition("test".to_string()).await;
         assert_eq!(definition.name, "edit");
-        assert!(definition.description.contains("precise string replacement"));
+        assert!(definition
+            .description
+            .contains("precise string replacement"));
     }
 }

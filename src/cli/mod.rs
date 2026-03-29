@@ -1,5 +1,5 @@
-mod args;
 mod app;
+mod args;
 mod session;
 pub mod spinner;
 mod terminal;

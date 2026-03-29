@@ -95,6 +95,7 @@ pub enum FrontendEvent {
         call_id: String,
         name: String,
         result_preview: String,
+        is_error: bool,
     },
     RetryScheduled {
         turn_id: u64,
@@ -253,9 +254,7 @@ impl FrontendEventSender {
         }
     }
 
-    pub async fn flush_best_effort(
-        &self,
-    ) -> Result<usize, mpsc::error::SendError<FrontendEvent>> {
+    pub async fn flush_best_effort(&self) -> Result<usize, mpsc::error::SendError<FrontendEvent>> {
         let mut flushed = 0;
 
         loop {
@@ -299,9 +298,7 @@ pub fn frontend_command_channel(
     mpsc::channel(capacity)
 }
 
-pub fn frontend_event_channel(
-    capacity: usize,
-) -> (FrontendEventSender, FrontendEventReceiver) {
+pub fn frontend_event_channel(capacity: usize) -> (FrontendEventSender, FrontendEventReceiver) {
     let (tx, rx) = mpsc::channel(capacity);
     (FrontendEventSender::new(tx), rx)
 }
@@ -329,6 +326,7 @@ mod tests {
             call_id: "tool-1".to_string(),
             name: "read".to_string(),
             result_preview: "done".to_string(),
+            is_error: false,
         };
         assert!(matches!(finished, FrontendEvent::ToolCallFinished { .. }));
 
@@ -401,7 +399,10 @@ mod tests {
         let first = receiver.recv().await.expect("first event should be queued");
         assert!(matches!(first, FrontendEvent::SessionStarted { .. }));
 
-        let flushed = sender.flush_best_effort().await.expect("flush should succeed");
+        let flushed = sender
+            .flush_best_effort()
+            .await
+            .expect("flush should succeed");
         assert_eq!(flushed, 1);
 
         let second = receiver.recv().await.expect("coalesced event should flush");

@@ -1,11 +1,11 @@
-use rig::tool::Tool;
 use rig::completion::ToolDefinition;
-use serde::Deserialize;
+use rig::tool::Tool;
 use schemars::JsonSchema;
+use serde::Deserialize;
 use std::sync::Arc;
 use tokio::sync::Mutex;
 
-use crate::planning::{TodoManager, TodoItem, TodoStatus, TodoError};
+use crate::planning::{TodoError, TodoItem, TodoManager, TodoStatus};
 
 /// Arguments for the Todo tool
 #[derive(Debug, Clone, Deserialize, JsonSchema)]
@@ -70,7 +70,8 @@ Usage notes:
 - Maximum 20 todos allowed
 - Only one task can be in_progress at a time
 - Status options: pending, in_progress, completed
-"#.to_string(),
+"#
+            .to_string(),
             parameters: serde_json::to_value(schemars::schema_for!(TodoArgs))
                 .expect("Failed to generate schema for TodoArgs"),
         }

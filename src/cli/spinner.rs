@@ -5,14 +5,14 @@ pub const SPINNER_FRAMES: &[&str] = &["·", "✻", "✽", "✶", "✳", "✢"];
 
 /// Fun status messages that rotate during activity
 pub const FUN_MESSAGES: &[&str] = &[
-    "Thinking...",
-    "Sketching...",
-    "Reticulating...",
-    "Beep boop...",
-    "Processing...",
-    "Computing...",
-    "Pondering...",
-    "Analyzing...",
+    "Beaming...",
+    "Reasoning...",
+    "Tracing...",
+    "Planning...",
+    "Stitching...",
+    "Parsing...",
+    "Searching...",
+    "Synthesizing...",
 ];
 
 /// Spinner state for animation
@@ -30,7 +30,7 @@ impl Spinner {
             frame_index: 0,
             message_index: 0,
             last_update: Instant::now(),
-            frame_interval_ms: 150,     // Frame change every 150ms
+            frame_interval_ms: 150,    // Frame change every 150ms
             message_interval_ms: 2000, // Message change every 2s
         }
     }

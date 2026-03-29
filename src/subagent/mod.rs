@@ -1,3 +1,3 @@
 mod tool;
 
-pub use tool::{SubagentTool, SubagentConfig, SubagentError, TaskArgs};
+pub use tool::{SubagentConfig, SubagentError, SubagentTool, TaskArgs};

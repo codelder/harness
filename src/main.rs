@@ -1,6 +1,6 @@
 use anyhow::Result;
 use clap::Parser;
-use harness::{Args, Provider, Session, ProviderType};
+use harness::{Args, Provider, ProviderType, Session};
 use std::path::PathBuf;
 use tracing_subscriber::prelude::*;
 use tracing_subscriber::Layer;
@@ -56,8 +56,9 @@ fn setup_tracing(level: tracing::Level) -> Option<tracing_appender::non_blocking
                             && !meta.target().starts_with("rig::responses")
                     }))
                     .with_filter(
-                        tracing_subscriber::EnvFilter::try_from_default_env()
-                            .unwrap_or_else(|_| tracing_subscriber::EnvFilter::new(level.to_string())),
+                        tracing_subscriber::EnvFilter::try_from_default_env().unwrap_or_else(
+                            |_| tracing_subscriber::EnvFilter::new(level.to_string()),
+                        ),
                     ),
             )
             // LLM log layer: only rig::completions and rig::responses (raw LLM API logs)
@@ -87,8 +88,9 @@ fn setup_tracing(level: tracing::Level) -> Option<tracing_appender::non_blocking
                     .with_line_number(true)
                     .with_ansi(false)
                     .with_filter(
-                        tracing_subscriber::EnvFilter::try_from_default_env()
-                            .unwrap_or_else(|_| tracing_subscriber::EnvFilter::new(level.to_string())),
+                        tracing_subscriber::EnvFilter::try_from_default_env().unwrap_or_else(
+                            |_| tracing_subscriber::EnvFilter::new(level.to_string()),
+                        ),
                     ),
             )
             .init();
@@ -111,7 +113,12 @@ async fn main() -> Result<()> {
 
     tracing::info!("Starting Agent Harness v0.1.0");
     tracing::info!("Log file: {}/harness.log", get_log_dir().display());
-    tracing::debug!("Provider: {:?}, Model: {}, Verbose: {}", args.provider, args.model, args.verbose);
+    tracing::debug!(
+        "Provider: {:?}, Model: {}, Verbose: {}",
+        args.provider,
+        args.model,
+        args.verbose
+    );
 
     // Convert CLI Provider to LLM ProviderType
     let provider_type = match args.provider {
@@ -121,23 +128,27 @@ async fn main() -> Result<()> {
     };
 
     // Use default model if user specified a different provider but not model
-    let model = if args.model == "claude-3-5-sonnet-20241022" && args.provider != Provider::Anthropic {
-        tracing::info!("Using default model for {:?}", args.provider);
-        Args::default_model(args.provider)
-    } else {
-        &args.model
-    };
+    let model =
+        if args.model == "claude-3-5-sonnet-20241022" && args.provider != Provider::Anthropic {
+            tracing::info!("Using default model for {:?}", args.provider);
+            Args::default_model(args.provider)
+        } else {
+            &args.model
+        };
 
     // Create and run session
     let mut session = Session::new();
 
-    if let Err(e) = session.run(
-        provider_type,
-        model,
-        args.base_url.as_deref(),
-        args.thinking,
-        args.thinking_budget,
-    ).await {
+    if let Err(e) = session
+        .run(
+            provider_type,
+            model,
+            args.base_url.as_deref(),
+            args.thinking,
+            args.thinking_budget,
+        )
+        .await
+    {
         tracing::error!("Session error: {}", e);
         eprintln!("Error: {}", e);
         std::process::exit(1);

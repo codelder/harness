@@ -11,15 +11,14 @@ use tokio::task::JoinHandle;
 
 pub type CliTerminal = Terminal<CrosstermBackend<Stdout>>;
 
-/// Minimum inline viewport height to ensure usable display.
-const MIN_INLINE_HEIGHT: u16 = 10;
-/// Reserve lines for status/composer margins.
-const MARGIN_LINES: u16 = 2;
+/// Minimum viewport height for composer + status.
+const VIEWPORT_HEIGHT: u16 = 4;
 
-/// Calculate inline viewport height from terminal size.
-/// Returns at least MIN_INLINE_HEIGHT to ensure usable display.
-pub fn calculate_inline_height(terminal_height: u16) -> u16 {
-    terminal_height.saturating_sub(MARGIN_LINES).max(MIN_INLINE_HEIGHT)
+/// Calculate the baseline inline viewport height from terminal size.
+/// The session may expand this later when todo/tools need more room.
+/// Timeline content is printed directly to stdout and scrolls with the terminal.
+pub fn calculate_inline_height(_terminal_height: u16) -> u16 {
+    VIEWPORT_HEIGHT
 }
 
 /// Centralized terminal lifecycle guard for raw mode and inline viewport ownership.
@@ -52,25 +51,74 @@ impl TerminalGuard {
         Ok(())
     }
 
+    pub fn insert_before<F>(&mut self, height: u16, render_fn: F) -> io::Result<()>
+    where
+        F: FnOnce(&mut ratatui::buffer::Buffer),
+    {
+        if let Some(terminal) = self.terminal.as_mut() {
+            terminal.insert_before(height, render_fn)?;
+        }
+        Ok(())
+    }
+
     /// Handle terminal resize by recalculating inline height.
     /// Returns true if viewport height changed.
     pub fn handle_resize(&mut self) -> io::Result<bool> {
         if let Some(terminal) = &mut self.terminal {
-            let size = terminal.size()?;
-            let new_height = calculate_inline_height(size.height);
-            if new_height != self.inline_height {
-                self.inline_height = new_height;
-                // Reconfigure viewport with new height
-                terminal.resize(ratatui::layout::Rect::new(
-                    0,
-                    0,
-                    size.width,
-                    new_height,
-                ))?;
-                return Ok(true);
-            }
+            // Inline/fullscreen viewports are auto-resized by ratatui 0.30+.
+            // Keep the current inline height; autoresize only reconciles width and
+            // the viewport's on-screen position with the terminal's new size.
+            terminal.autoresize()?;
+            return Ok(false);
         }
         Ok(false)
+    }
+
+    /// Dynamically adjust viewport height (e.g. to show executing tools).
+    /// Returns true if the height actually changed.
+    #[allow(dead_code)]
+    pub fn set_viewport_height(&mut self, height: u16) -> io::Result<bool> {
+        if height == self.inline_height {
+            tracing::trace!("set_viewport_height: unchanged at {}", height);
+            return Ok(false);
+        }
+        let old_height = self.inline_height;
+        if let Some(mut terminal) = self.terminal.take() {
+            // `Viewport::Inline(height)` stores the height in the terminal itself.
+            // Calling `resize(Rect)` only resizes buffers; it does not mutate the
+            // inline viewport's configured height. Recreate the terminal instead.
+            terminal.clear()?;
+            drop(terminal);
+
+            self.inline_height = height;
+            let backend = CrosstermBackend::new(io::stdout());
+            let terminal = Terminal::with_options(
+                backend,
+                TerminalOptions {
+                    viewport: Viewport::Inline(height),
+                },
+            )?;
+            self.terminal = Some(terminal);
+            tracing::debug!("set_viewport_height: {} -> {}", old_height, height);
+            return Ok(true);
+        }
+        Ok(false)
+    }
+
+    /// Get the current viewport height.
+    #[allow(dead_code)]
+    pub fn viewport_height(&self) -> u16 {
+        self.inline_height
+    }
+
+    /// Get the terminal size (width, height).
+    pub fn size(&self) -> io::Result<(u16, u16)> {
+        if let Some(terminal) = &self.terminal {
+            let size = terminal.size()?;
+            Ok((size.width, size.height))
+        } else {
+            Ok((80, 24)) // Default fallback
+        }
     }
 
     pub fn restore(&mut self) -> io::Result<()> {
@@ -110,7 +158,10 @@ pub fn spawn_input_listener(
             if event::poll(Duration::from_millis(50)).map_err(|error| error.to_string())? {
                 match event::read().map_err(|error| error.to_string())? {
                     Event::Key(key) => {
-                        if key.kind == KeyEventKind::Press && tx.send(InputEvent::Key(key)).is_err()
+                        // Accept Press and Release events to support terminals like Warp
+                        // that may send different key event kinds than iTerm2/Terminal.app
+                        if key.kind != KeyEventKind::Repeat
+                            && tx.send(InputEvent::Key(key)).is_err()
                         {
                             break;
                         }
@@ -173,9 +224,12 @@ impl TerminalLifecycleOps for SystemLifecycleOps {
 
     fn create_inline_terminal(&mut self, height: u16) -> io::Result<Self::Terminal> {
         let backend = CrosstermBackend::new(io::stdout());
-        Terminal::with_options(backend, TerminalOptions {
-            viewport: Viewport::Inline(height),
-        })
+        Terminal::with_options(
+            backend,
+            TerminalOptions {
+                viewport: Viewport::Inline(height),
+            },
+        )
     }
 
     fn show_cursor(&mut self, terminal: &mut Self::Terminal) -> io::Result<()> {
@@ -411,7 +465,7 @@ pub(crate) mod tests {
             vec![
                 "enable_raw_mode",
                 "create_inline_terminal",
-                "height_22", // 24 - 2 margins = 22
+                "height_4", // Minimum viewport height
                 "show_cursor",
                 "disable_raw_mode",
             ]
@@ -419,9 +473,9 @@ pub(crate) mod tests {
     }
 
     #[test]
-    fn calculate_inline_height_respects_minimum() {
-        assert_eq!(calculate_inline_height(5), 10); // Below minimum
-        assert_eq!(calculate_inline_height(20), 18); // Normal case (20 - 2 margins)
-        assert_eq!(calculate_inline_height(100), 98); // Large terminal
+    fn calculate_inline_height_returns_minimum_viewport() {
+        assert_eq!(calculate_inline_height(5), 4);
+        assert_eq!(calculate_inline_height(20), 4);
+        assert_eq!(calculate_inline_height(100), 4);
     }
 }

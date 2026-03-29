@@ -1,4 +1,4 @@
-use harness::{with_retry, Message, Role, AgentError};
+use harness::{with_retry, AgentError, Message, Role};
 
 #[test]
 fn test_message_types() {
@@ -22,8 +22,12 @@ fn test_message_cloning() {
 
 #[tokio::test]
 async fn test_with_retry_immediate_success() {
-    let result = with_retry(3, || async { Ok::<_, AgentError>(42) }, |_a, _m, _d, _e| async {})
-        .await;
+    let result = with_retry(
+        3,
+        || async { Ok::<_, AgentError>(42) },
+        |_a, _m, _d, _e| async {},
+    )
+    .await;
     assert_eq!(result.unwrap(), 42);
 }
 

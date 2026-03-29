@@ -1,9 +1,12 @@
 use super::{AgentTurn, Message, Role};
 use crate::error::{classify_prompt_error, AgentError};
-use crate::frontend::{FrontendEvent, FrontendEventSender, SESSION_START_TURN_ID};
-use rig::agent::{PromptHook, ToolCallHookAction, HookAction};
+use crate::frontend::{
+    FrontendEvent, FrontendEventSender, FrontendTodoItem, FrontendTodoStatus, SESSION_START_TURN_ID,
+};
+use rig::agent::{HookAction, PromptHook, ToolCallHookAction};
 use rig::completion::{AssistantContent, CompletionModel};
 use rig::message::ReasoningContent;
+use serde::Deserialize;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 use std::time::Duration;
@@ -59,11 +62,7 @@ impl TodoUsageHook {
         }
 
         let call_id = tool_call_id.unwrap_or_else(|| internal_call_id.to_string());
-        let args_preview = if args.len() > 100 {
-            format!("{}...", &args[..100])
-        } else {
-            args.to_string()
-        };
+        let args_preview = args.to_string();
 
         self.emit_event(FrontendEvent::ToolCallStarted {
             turn_id: self.turn_id,
@@ -79,27 +78,57 @@ impl TodoUsageHook {
         tool_name: &str,
         tool_call_id: Option<String>,
         internal_call_id: &str,
+        args: &str,
         result: &str,
     ) {
+        tracing::debug!(
+            tool_name,
+            result_len = result.len(),
+            result_preview_80 = truncate_preview(result, 80),
+            "Raw tool result received by hook"
+        );
+
         let decoded_result =
             serde_json::from_str::<String>(result).unwrap_or_else(|_| result.to_string());
 
+        tracing::debug!(
+            tool_name,
+            decoded_len = decoded_result.len(),
+            decoded_lines = decoded_result.lines().count(),
+            decoded_preview_80 = truncate_preview(&decoded_result, 80),
+            "Decoded tool result for UI"
+        );
+
         let call_id = tool_call_id.unwrap_or_else(|| internal_call_id.to_string());
-        let result_preview = if decoded_result.len() > 200 {
-            format!("{}...", &decoded_result[..200])
-        } else if decoded_result.is_empty() {
+        let mut result_preview = if decoded_result.is_empty() {
             "(empty)".to_string()
         } else {
             decoded_result
         };
+        let is_error = result_preview.starts_with("Toolset error: ")
+            || result_preview.starts_with("ToolCallError: ");
+        if is_error {
+            result_preview = strip_error_chain(&result_preview);
+        }
 
         self.emit_event(FrontendEvent::ToolCallFinished {
             turn_id: self.turn_id,
             call_id,
             name: tool_name.to_string(),
             result_preview,
+            is_error,
         })
         .await;
+
+        if tool_name == "todo" && !is_error {
+            if let Some(items) = parse_todo_snapshot_args(args) {
+                self.emit_event(FrontendEvent::TodoSnapshot {
+                    turn_id: self.turn_id,
+                    items,
+                })
+                .await;
+            }
+        }
     }
 
     async fn record_thinking(&self, thinking_text: String) {
@@ -179,10 +208,10 @@ where
         tool_name: &str,
         tool_call_id: Option<String>,
         internal_call_id: &str,
-        _args: &str,
+        args: &str,
         result: &str,
     ) -> HookAction {
-        self.record_tool_result(tool_name, tool_call_id, internal_call_id, result)
+        self.record_tool_result(tool_name, tool_call_id, internal_call_id, args, result)
             .await;
         HookAction::cont()
     }
@@ -214,11 +243,7 @@ where
     }
 
     /// Called when receiving text delta (streaming) - optional real-time text display
-    async fn on_text_delta(
-        &self,
-        text_delta: &str,
-        _aggregated_text: &str,
-    ) -> HookAction {
+    async fn on_text_delta(&self, text_delta: &str, _aggregated_text: &str) -> HookAction {
         self.record_text_delta(text_delta).await;
         HookAction::cont()
     }
@@ -474,7 +499,11 @@ mod tests {
         let elapsed = start.elapsed();
         assert_eq!(result.unwrap(), 42);
         // Should have waited at least 100ms (the retry-after duration)
-        assert!(elapsed >= Duration::from_millis(100), "Expected at least 100ms wait, got {:?}", elapsed);
+        assert!(
+            elapsed >= Duration::from_millis(100),
+            "Expected at least 100ms wait, got {:?}",
+            elapsed
+        );
     }
 
     #[tokio::test]
@@ -489,8 +518,14 @@ mod tests {
             "{\"items\":[]}",
         )
         .await;
-        hook.record_tool_result("todo", Some("tool-call".to_string()), "internal-1", "\"updated\"")
-            .await;
+        hook.record_tool_result(
+            "todo",
+            Some("tool-call".to_string()),
+            "internal-1",
+            "{\"items\":[]}",
+            "\"updated\"",
+        )
+        .await;
         hook.emit_retry_scheduled(
             1,
             3,
@@ -516,6 +551,14 @@ mod tests {
                 call_id: "tool-call".to_string(),
                 name: "todo".to_string(),
                 result_preview: "updated".to_string(),
+                is_error: false,
+            })
+        );
+        assert_eq!(
+            event_rx.recv().await,
+            Some(FrontendEvent::TodoSnapshot {
+                turn_id: 7,
+                items: vec![],
             })
         );
         assert_eq!(
@@ -537,8 +580,14 @@ mod tests {
 
         hook.record_tool_call("read", None, "internal-call", "{\"path\":\"README.md\"}")
             .await;
-        hook.record_tool_result("read", None, "internal-call", "\"contents\"")
-            .await;
+        hook.record_tool_result(
+            "read",
+            None,
+            "internal-call",
+            "{\"path\":\"README.md\"}",
+            "\"contents\"",
+        )
+        .await;
 
         assert_eq!(
             event_rx.recv().await,
@@ -556,6 +605,7 @@ mod tests {
                 call_id: "internal-call".to_string(),
                 name: "read".to_string(),
                 result_preview: "contents".to_string(),
+                is_error: false,
             })
         );
     }
@@ -589,4 +639,141 @@ mod tests {
         let hook = TodoUsageHook::default();
         assert_eq!(hook.turn_id, SESSION_START_TURN_ID);
     }
+
+    /// Verify that the JSON encode/decode round-trip preserves newlines.
+    /// This mirrors what rig's ToolDyn::call does (serde_json::to_string)
+    /// and what record_tool_result does (serde_json::from_str::<String>).
+    #[test]
+    fn json_round_trip_preserves_multiline_content() {
+        let original = "line 1\nline 2\nline 3\nline 4\nline 5".to_string();
+        assert_eq!(original.lines().count(), 5, "sanity check");
+
+        // Simulate rig's ToolDyn::call: serde_json::to_string(&output)
+        let encoded = serde_json::to_string(&original).unwrap();
+        tracing::info!("Encoded: {:?}", encoded);
+
+        // Simulate hook's record_tool_result: serde_json::from_str::<String>(result)
+        let decoded: String = serde_json::from_str(&encoded).unwrap();
+        assert_eq!(decoded, original, "round-trip should preserve content");
+        assert_eq!(decoded.lines().count(), 5, "lines should be preserved");
+    }
+
+    /// Verify that if serde_json::from_str fails, the fallback produces a
+    /// single-line string (which would explain the "Read 1 lines" bug).
+    #[test]
+    fn json_fallback_preserves_raw_input_on_failure() {
+        let non_json = "this is not json".to_string();
+        let decoded =
+            serde_json::from_str::<String>(&non_json).unwrap_or_else(|_| non_json.clone());
+        assert_eq!(decoded, "this is not json");
+
+        // Multi-line non-JSON: fallback preserves newlines
+        let multiline = "line 1\nline 2\nline 3".to_string();
+        let decoded =
+            serde_json::from_str::<String>(&multiline).unwrap_or_else(|_| multiline.clone());
+        assert_eq!(decoded.lines().count(), 3);
+    }
+
+    #[test]
+    fn strip_error_chain_extracts_root_message() {
+        // Full rig-core error chain — only strips rig's own wrappers
+        assert_eq!(
+            strip_error_chain("Toolset error: ToolCallError: ToolCallError: Failed to read file: No such file or directory (os error 2)"),
+            "Failed to read file: No such file or directory (os error 2)"
+        );
+
+        // Tool's own message is preserved as-is
+        assert_eq!(
+            strip_error_chain(
+                "Toolset error: ToolCallError: Command execution failed: Permission denied"
+            ),
+            "Command execution failed: Permission denied"
+        );
+
+        // No rig-core prefix — returned unchanged
+        assert_eq!(
+            strip_error_chain("something unexpected happened"),
+            "something unexpected happened"
+        );
+    }
+
+    #[test]
+    fn truncate_preview_handles_multibyte_utf8() {
+        let text = "你好，世界";
+        let preview = truncate_preview(text, 5);
+        assert!(preview.is_char_boundary(preview.len()));
+        assert!(!preview.is_empty());
+    }
+}
+
+/// Strip rig-core's error chain wrappers to extract the root error message.
+///
+/// rig-core wraps tool errors with fixed prefixes (see rig-core 0.31):
+/// - `ToolSetToolError` adds `"ToolCallError: "`   (tool/mod.rs:408)
+/// - `ToolError::Display` adds `"ToolCallError: "`  (tool/mod.rs:48)
+/// - `ToolSetError` adds `"Toolset error: "`        (tool/server.rs:413)
+/// - `request::ToolCallError` adds `"ToolCallError: "` (request.rs:129)
+///
+/// These are structural wrappers that always appear in the chain.
+/// After stripping them, what remains is the tool's own error message.
+fn strip_error_chain(error: &str) -> String {
+    let prefixes = ["Toolset error: ", "ToolCallError: "];
+
+    let mut result = error.to_string();
+    loop {
+        let original = result.clone();
+        for prefix in &prefixes {
+            if result.starts_with(prefix) {
+                result = result[prefix.len()..].to_string();
+            }
+        }
+        if result == original {
+            break;
+        }
+    }
+    result.trim().to_string()
+}
+
+fn truncate_preview(text: &str, max: usize) -> &str {
+    let end = text.floor_char_boundary(max.min(text.len()));
+    &text[..end]
+}
+
+#[derive(Debug, Deserialize)]
+struct TodoSnapshotArgs {
+    items: Vec<TodoSnapshotItem>,
+}
+
+#[derive(Debug, Deserialize)]
+struct TodoSnapshotItem {
+    id: u32,
+    text: String,
+    status: TodoSnapshotStatus,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "snake_case")]
+enum TodoSnapshotStatus {
+    Pending,
+    InProgress,
+    Completed,
+}
+
+fn parse_todo_snapshot_args(args: &str) -> Option<Vec<FrontendTodoItem>> {
+    let parsed = serde_json::from_str::<TodoSnapshotArgs>(args).ok()?;
+    Some(
+        parsed
+            .items
+            .into_iter()
+            .map(|item| FrontendTodoItem {
+                id: item.id,
+                text: item.text,
+                status: match item.status {
+                    TodoSnapshotStatus::Pending => FrontendTodoStatus::Pending,
+                    TodoSnapshotStatus::InProgress => FrontendTodoStatus::InProgress,
+                    TodoSnapshotStatus::Completed => FrontendTodoStatus::Completed,
+                },
+            })
+            .collect(),
+    )
 }

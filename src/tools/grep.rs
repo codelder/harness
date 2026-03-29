@@ -1,7 +1,7 @@
-use rig::tool::Tool;
 use rig::completion::ToolDefinition;
-use serde::{Deserialize, Serialize};
+use rig::tool::Tool;
 use schemars::JsonSchema;
+use serde::{Deserialize, Serialize};
 
 /// Maximum output characters to prevent context explosion
 const MAX_OUTPUT_CHARS: usize = 50_000;
@@ -51,7 +51,8 @@ Usage notes:
 - Use case_insensitive=true for case-insensitive matching
 - Returns matches in format: path:line_number:line_content
 - Output is truncated at 50K characters to prevent context explosion
-"#.to_string(),
+"#
+            .to_string(),
             parameters: serde_json::to_value(schemars::schema_for!(GrepArgs))
                 .expect("Failed to generate schema for GrepArgs"),
         }
@@ -91,7 +92,10 @@ Usage notes:
 
         // Truncate if exceeds MAX_OUTPUT_CHARS
         if result.len() > MAX_OUTPUT_CHARS {
-            result = format!("{}... (truncated, too many matches)", &result[..MAX_OUTPUT_CHARS]);
+            result = format!(
+                "{}... (truncated, too many matches)",
+                &result[..MAX_OUTPUT_CHARS]
+            );
         }
 
         Ok(result)
@@ -101,8 +105,8 @@ Usage notes:
 #[cfg(test)]
 mod tests {
     use super::*;
-    use tempfile::NamedTempFile;
     use std::io::Write;
+    use tempfile::NamedTempFile;
 
     #[tokio::test]
     async fn test_grep_tool_finds_matching_lines() {

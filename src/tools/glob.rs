@@ -1,7 +1,7 @@
-use rig::tool::Tool;
 use rig::completion::ToolDefinition;
-use serde::{Deserialize, Serialize};
+use rig::tool::Tool;
 use schemars::JsonSchema;
+use serde::{Deserialize, Serialize};
 
 /// Arguments for the Glob tool
 #[derive(Debug, Clone, Deserialize, JsonSchema)]
@@ -44,7 +44,8 @@ Usage notes:
 - Supports ** for recursive directory matching
 - Use the path parameter to specify a base directory (defaults to current directory)
 - Returns newline-separated list of matching file paths
-"#.to_string(),
+"#
+            .to_string(),
             parameters: serde_json::to_value(schemars::schema_for!(GlobArgs))
                 .expect("Failed to generate schema for GlobArgs"),
         }
@@ -88,7 +89,11 @@ mod tests {
         let result = tool.call(args).await.unwrap();
         // All results should start with src/tools
         for line in result.lines() {
-            assert!(line.starts_with("src/tools"), "Path {} doesn't start with src/tools", line);
+            assert!(
+                line.starts_with("src/tools"),
+                "Path {} doesn't start with src/tools",
+                line
+            );
         }
     }
 

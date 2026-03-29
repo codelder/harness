@@ -1,7 +1,7 @@
-use rig::tool::Tool;
 use rig::completion::ToolDefinition;
-use serde::Deserialize;
+use rig::tool::Tool;
 use schemars::JsonSchema;
+use serde::Deserialize;
 use tokio::fs;
 
 /// Arguments for the Write tool
@@ -41,7 +41,8 @@ Usage notes:
 - Creates parent directories if they don't exist
 - Overwrites existing files completely
 - Use absolute paths for reliable operation
-"#.to_string(),
+"#
+            .to_string(),
             parameters: serde_json::to_value(schemars::schema_for!(WriteArgs))
                 .expect("Failed to generate schema for WriteArgs"),
         }

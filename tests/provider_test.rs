@@ -1,4 +1,4 @@
-use harness::{ProviderType, ProviderError};
+use harness::{ProviderError, ProviderType};
 
 #[test]
 fn test_parse_anthropic_provider() {
@@ -20,9 +20,18 @@ fn test_parse_ollama_provider() {
 
 #[test]
 fn test_parse_provider_case_insensitive() {
-    assert_eq!("ANTHROPIC".parse::<ProviderType>().unwrap(), ProviderType::Anthropic);
-    assert_eq!("OpenAI".parse::<ProviderType>().unwrap(), ProviderType::Openai);
-    assert_eq!("OLLAMA".parse::<ProviderType>().unwrap(), ProviderType::Ollama);
+    assert_eq!(
+        "ANTHROPIC".parse::<ProviderType>().unwrap(),
+        ProviderType::Anthropic
+    );
+    assert_eq!(
+        "OpenAI".parse::<ProviderType>().unwrap(),
+        ProviderType::Openai
+    );
+    assert_eq!(
+        "OLLAMA".parse::<ProviderType>().unwrap(),
+        ProviderType::Ollama
+    );
 }
 
 #[test]

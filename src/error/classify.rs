@@ -35,10 +35,7 @@ pub enum AgentError {
 impl AgentError {
     /// Returns true if this error is retryable with exponential backoff
     pub fn is_retryable(&self) -> bool {
-        matches!(
-            self,
-            AgentError::Network(_) | AgentError::RateLimited(_)
-        )
+        matches!(self, AgentError::Network(_) | AgentError::RateLimited(_))
     }
 
     /// Returns true if this error indicates context limit was reached
@@ -83,30 +80,19 @@ pub fn is_retryable(error: &AgentError) -> bool {
 /// An appropriately classified AgentError
 pub fn classify_prompt_error(err: PromptError) -> AgentError {
     match err {
-        PromptError::CompletionError(completion_err) => {
-            classify_completion_error(completion_err)
-        }
+        PromptError::CompletionError(completion_err) => classify_completion_error(completion_err),
         PromptError::ToolError(e) => {
             AgentError::Provider(ProviderError::RequestFailed(format!("Tool error: {}", e)))
         }
-        PromptError::ToolServerError(e) => {
-            AgentError::Provider(ProviderError::RequestFailed(format!(
-                "Tool server error: {}",
-                e
-            )))
-        }
-        PromptError::MaxTurnsError { max_turns, .. } => {
-            AgentError::Provider(ProviderError::RequestFailed(format!(
-                "Max turns exceeded: {}",
-                max_turns
-            )))
-        }
-        PromptError::PromptCancelled { reason, .. } => {
-            AgentError::Provider(ProviderError::RequestFailed(format!(
-                "Prompt cancelled: {}",
-                reason
-            )))
-        }
+        PromptError::ToolServerError(e) => AgentError::Provider(ProviderError::RequestFailed(
+            format!("Tool server error: {}", e),
+        )),
+        PromptError::MaxTurnsError { max_turns, .. } => AgentError::Provider(
+            ProviderError::RequestFailed(format!("Max turns exceeded: {}", max_turns)),
+        ),
+        PromptError::PromptCancelled { reason, .. } => AgentError::Provider(
+            ProviderError::RequestFailed(format!("Prompt cancelled: {}", reason)),
+        ),
     }
 }
 
@@ -127,12 +113,8 @@ fn classify_completion_error(err: CompletionError) -> AgentError {
         CompletionError::RequestError(e) => {
             AgentError::Provider(ProviderError::RequestFailed(e.to_string()))
         }
-        CompletionError::JsonError(e) => {
-            AgentError::InvalidRequest(format!("JSON error: {}", e))
-        }
-        CompletionError::UrlError(e) => {
-            AgentError::InvalidRequest(format!("URL error: {}", e))
-        }
+        CompletionError::JsonError(e) => AgentError::InvalidRequest(format!("JSON error: {}", e)),
+        CompletionError::UrlError(e) => AgentError::InvalidRequest(format!("URL error: {}", e)),
     }
 }
 
@@ -146,9 +128,7 @@ fn classify_http_error(err: HttpError) -> AgentError {
             // Underlying reqwest error (timeout, connection failed, etc.)
             AgentError::Network(e.to_string())
         }
-        HttpError::Protocol(e) => {
-            AgentError::Network(format!("HTTP protocol error: {}", e))
-        }
+        HttpError::Protocol(e) => AgentError::Network(format!("HTTP protocol error: {}", e)),
         _ => AgentError::Network(err.to_string()),
     }
 }
@@ -169,16 +149,14 @@ fn classify_status_code(status: StatusCode, body: &str) -> AgentError {
         }
 
         // 500 Internal Server Error - retryable
-        StatusCode::INTERNAL_SERVER_ERROR => AgentError::Network(format!(
-            "Server error (500): {}",
-            truncate_error_body(body)
-        )),
+        StatusCode::INTERNAL_SERVER_ERROR => {
+            AgentError::Network(format!("Server error (500): {}", truncate_error_body(body)))
+        }
 
         // 502 Bad Gateway - retryable
-        StatusCode::BAD_GATEWAY => AgentError::Network(format!(
-            "Bad gateway (502): {}",
-            truncate_error_body(body)
-        )),
+        StatusCode::BAD_GATEWAY => {
+            AgentError::Network(format!("Bad gateway (502): {}", truncate_error_body(body)))
+        }
 
         // 503 Service Unavailable - retryable
         StatusCode::SERVICE_UNAVAILABLE => AgentError::Network(format!(
@@ -193,16 +171,14 @@ fn classify_status_code(status: StatusCode, body: &str) -> AgentError {
         )),
 
         // 401 Unauthorized - not retryable
-        StatusCode::UNAUTHORIZED => AgentError::Auth(format!(
-            "Unauthorized (401): {}",
-            truncate_error_body(body)
-        )),
+        StatusCode::UNAUTHORIZED => {
+            AgentError::Auth(format!("Unauthorized (401): {}", truncate_error_body(body)))
+        }
 
         // 403 Forbidden - not retryable
-        StatusCode::FORBIDDEN => AgentError::Auth(format!(
-            "Forbidden (403): {}",
-            truncate_error_body(body)
-        )),
+        StatusCode::FORBIDDEN => {
+            AgentError::Auth(format!("Forbidden (403): {}", truncate_error_body(body)))
+        }
 
         // 400 Bad Request - check for context limit first
         StatusCode::BAD_REQUEST => {
@@ -218,10 +194,9 @@ fn classify_status_code(status: StatusCode, body: &str) -> AgentError {
         }
 
         // 404 Not Found - not retryable
-        StatusCode::NOT_FOUND => AgentError::InvalidRequest(format!(
-            "Not found (404): {}",
-            truncate_error_body(body)
-        )),
+        StatusCode::NOT_FOUND => {
+            AgentError::InvalidRequest(format!("Not found (404): {}", truncate_error_body(body)))
+        }
 
         // 413 Payload Too Large - context limit
         StatusCode::PAYLOAD_TOO_LARGE => AgentError::ContextLimit,
@@ -278,9 +253,7 @@ fn classify_provider_message(msg: &str) -> Option<AgentError> {
     let lower = msg.to_lowercase();
 
     // Check for rate limit indicators
-    if lower.contains("rate limit")
-        || lower.contains("too many requests")
-        || lower.contains("429")
+    if lower.contains("rate limit") || lower.contains("too many requests") || lower.contains("429")
     {
         return Some(AgentError::RateLimited(DEFAULT_RETRY_DELAY));
     }
@@ -505,7 +478,8 @@ mod tests {
     #[test]
     fn test_classify_status_400_context_limit() {
         // Anthropic-style context limit error (reported as 400)
-        let body = r#"{"error": {"type": "context_length_exceeded", "message": "prompt is too long"}}"#;
+        let body =
+            r#"{"error": {"type": "context_length_exceeded", "message": "prompt is too long"}}"#;
         let result = classify_status_code(StatusCode::BAD_REQUEST, body);
         assert!(matches!(result, AgentError::ContextLimit));
         assert!(result.is_context_limit());

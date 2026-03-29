@@ -121,7 +121,10 @@ mod tests {
 
     #[test]
     fn test_default_models() {
-        assert_eq!(Args::default_model(Provider::Anthropic), "claude-3-5-sonnet-20241022");
+        assert_eq!(
+            Args::default_model(Provider::Anthropic),
+            "claude-3-5-sonnet-20241022"
+        );
         assert_eq!(Args::default_model(Provider::Openai), "gpt-4o");
         assert_eq!(Args::default_model(Provider::Ollama), "llama3.2");
     }
