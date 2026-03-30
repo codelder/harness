@@ -112,6 +112,7 @@ impl TerminalGuard {
     }
 
     /// Get the terminal size (width, height).
+    #[allow(dead_code)]
     pub fn size(&self) -> io::Result<(u16, u16)> {
         if let Some(terminal) = &self.terminal {
             let size = terminal.size()?;
@@ -266,12 +267,12 @@ fn rollback_terminal_setup<Ops: TerminalLifecycleOps>(
 
 fn restore_terminal<Ops: TerminalLifecycleOps>(
     ops: &mut Ops,
-    mut terminal: Option<&mut Ops::Terminal>,
+    terminal: Option<&mut Ops::Terminal>,
     state: &mut LifecycleState,
 ) -> io::Result<()> {
     let mut first_error = None;
 
-    if let Some(active_terminal) = terminal.as_deref_mut() {
+    if let Some(active_terminal) = terminal {
         capture_cleanup_error(ops.show_cursor(active_terminal), &mut first_error);
     }
 

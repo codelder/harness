@@ -735,7 +735,12 @@ fn strip_error_chain(error: &str) -> String {
 }
 
 fn truncate_preview(text: &str, max: usize) -> &str {
-    let end = text.floor_char_boundary(max.min(text.len()));
+    let max = max.min(text.len());
+    let end = text.char_indices()
+        .take_while(|(idx, _)| *idx <= max)
+        .last()
+        .map(|(idx, c)| idx + c.len_utf8())
+        .unwrap_or(0);
     &text[..end]
 }
 

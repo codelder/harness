@@ -89,7 +89,7 @@ impl CliTheme {
                 .add_modifier(Modifier::SLOW_BLINK),
             tool_result_highlight: Style::default().add_modifier(Modifier::BOLD),
             error: Style::default().fg(Color::Red).add_modifier(Modifier::BOLD),
-            status: Style::default().fg(Color::Blue),
+            status: Style::default().fg(Color::Rgb(255, 165, 0)),
             banner: Style::default().add_modifier(Modifier::BOLD),
             composer: Style::default().add_modifier(Modifier::BOLD),
             composer_border: Style::default().fg(Color::Rgb(120, 120, 120)),
@@ -134,7 +134,7 @@ impl CliTheme {
                 .fg(Color::Black)
                 .add_modifier(Modifier::BOLD),
             error: Style::default().fg(Color::Red).add_modifier(Modifier::BOLD),
-            status: Style::default().fg(Color::Rgb(0, 0, 180)),
+            status: Style::default().fg(Color::Rgb(255, 165, 0)),
             banner: Style::default()
                 .fg(Color::Black)
                 .add_modifier(Modifier::BOLD),
@@ -242,10 +242,7 @@ fn query_osc11_background() -> Option<(u8, u8, u8)> {
     });
 
     // Timeout: if the terminal doesn't support OSC 11 we don't hang.
-    match handle.join() {
-        Ok(result) => result,
-        Err(_) => None,
-    }
+    handle.join().unwrap_or_default()
 }
 
 /// Parse OSC 11 response bytes into (R, G, B).

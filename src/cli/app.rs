@@ -981,7 +981,6 @@ impl CliApp {
 }
 
 /// Detect whether a tool result looks like an error message.
-
 fn capitalize_first(s: &str) -> String {
     let mut chars = s.chars();
     match chars.next() {
@@ -990,11 +989,27 @@ fn capitalize_first(s: &str) -> String {
     }
 }
 
+/// Find the largest valid char boundary index <= `index`
+/// This is a compatibility implementation for Rust < 1.91
+fn floor_char_boundary(s: &str, index: usize) -> usize {
+    let index = index.min(s.len());
+    if s.is_char_boundary(index) {
+        index
+    } else {
+        // Walk backwards to find the previous char boundary
+        let mut i = index;
+        while i > 0 && !s.is_char_boundary(i) {
+            i -= 1;
+        }
+        i
+    }
+}
+
 fn truncate_str(s: &str, max: usize) -> String {
     if s.len() <= max {
         return s.to_string();
     }
-    let end = s.floor_char_boundary(max.saturating_sub(3));
+    let end = floor_char_boundary(s, max.saturating_sub(3));
     format!("{}...", &s[..end])
 }
 
