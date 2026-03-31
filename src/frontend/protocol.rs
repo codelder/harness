@@ -38,6 +38,12 @@ pub struct FrontendTodoItem {
     pub status: FrontendTodoStatus,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct FrontendSubagentToolUse {
+    pub name: String,
+    pub args_preview: String,
+}
+
 /// Minimal user intent surface for v1 adapters.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum FrontendCommand {
@@ -112,6 +118,11 @@ pub enum FrontendEvent {
         turn_id: u64,
         items: Vec<FrontendTodoItem>,
     },
+    SubagentProgress {
+        turn_id: u64,
+        call_id: String,
+        tools: Vec<FrontendSubagentToolUse>,
+    },
     TokenUsage {
         turn_id: u64,
         input_tokens: u64,
@@ -136,7 +147,8 @@ impl FrontendEvent {
             FrontendEvent::AssistantMessageDelta { .. }
             | FrontendEvent::Thinking { .. }
             | FrontendEvent::Status { .. }
-            | FrontendEvent::TokenUsage { .. } => DeliveryMode::BestEffort,
+            | FrontendEvent::TokenUsage { .. }
+            | FrontendEvent::SubagentProgress { .. } => DeliveryMode::BestEffort,
             FrontendEvent::SessionStarted { .. }
             | FrontendEvent::UserMessageCommitted { .. }
             | FrontendEvent::AssistantMessageCompleted { .. }
@@ -163,6 +175,7 @@ struct BestEffortBacklog {
     thinking: Option<(u64, String)>,
     status: Option<String>,
     token_usage: Option<(u64, u64, u64, u64)>, // (turn_id, input, output, total)
+    subagent_progress: Option<(u64, String, Vec<FrontendSubagentToolUse>)>,
 }
 
 impl BestEffortBacklog {
@@ -185,11 +198,26 @@ impl BestEffortBacklog {
             } => {
                 self.token_usage = Some((turn_id, input_tokens, output_tokens, total_tokens));
             }
+            FrontendEvent::SubagentProgress {
+                turn_id,
+                call_id,
+                tools,
+            } => {
+                self.subagent_progress = Some((turn_id, call_id, tools));
+            }
             _ => {}
         }
     }
 
     fn pop_next(&mut self) -> Option<FrontendEvent> {
+        if let Some((turn_id, call_id, tools)) = self.subagent_progress.take() {
+            return Some(FrontendEvent::SubagentProgress {
+                turn_id,
+                call_id,
+                tools,
+            });
+        }
+
         if let Some((turn_id, input, output, total)) = self.token_usage.take() {
             return Some(FrontendEvent::TokenUsage {
                 turn_id,
@@ -339,6 +367,16 @@ mod tests {
             }],
         };
         assert!(matches!(snapshot, FrontendEvent::TodoSnapshot { .. }));
+
+        let subagent = FrontendEvent::SubagentProgress {
+            turn_id: 7,
+            call_id: "task-1".to_string(),
+            tools: vec![FrontendSubagentToolUse {
+                name: "read".to_string(),
+                args_preview: "/tmp/demo".to_string(),
+            }],
+        };
+        assert!(matches!(subagent, FrontendEvent::SubagentProgress { .. }));
     }
 
     #[test]

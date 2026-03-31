@@ -148,6 +148,7 @@ impl Session {
     ) -> Result<(), AgentError> {
         loop {
             Self::drain_events_and_flush(app, event_rx, event_tx).await?;
+            app.tick();
 
             terminal
                 .set_viewport_height(app.desired_viewport_height())
@@ -215,6 +216,7 @@ impl Session {
                 }
                 _ = tokio::time::sleep(Duration::from_millis(150)) => {
                     // Slower animation rate (150ms instead of 50ms) to reduce scroll churn
+                    app.tick();
                     flush_best_effort(event_tx).await?;
                 }
             }

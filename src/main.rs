@@ -129,7 +129,7 @@ async fn main() -> Result<()> {
 
     // Use default model if user specified a different provider but not model
     let model =
-        if args.model == "claude-3-5-sonnet-20241022" && args.provider != Provider::Anthropic {
+        if args.model == "glm-5.1" && args.provider != Provider::Anthropic {
             tracing::info!("Using default model for {:?}", args.provider);
             Args::default_model(args.provider)
         } else {

@@ -15,10 +15,13 @@ pub use error::{AgentError, ProviderError};
 pub use frontend::{
     frontend_command_channel, frontend_event_channel, send_frontend_command, FrontendCommand,
     FrontendCommandReceiver, FrontendCommandSender, FrontendEvent, FrontendEventReceiver,
-    FrontendEventSender, FrontendSessionSummary, FrontendTodoItem, FrontendTodoStatus,
-    SESSION_START_TURN_ID,
+    FrontendEventSender, FrontendSessionSummary, FrontendSubagentToolUse, FrontendTodoItem,
+    FrontendTodoStatus, SESSION_START_TURN_ID,
 };
 pub use llm::{create_parent_provider, create_provider, LlmProvider, ProviderType};
 pub use session::{SessionRuntime, SessionRuntimeConfig, SessionRuntimeOutcome, SessionSummary};
-pub use subagent::{SubagentConfig, SubagentError, SubagentTool, TaskArgs};
+pub use subagent::{
+    PendingSubagentCall, SharedSubagentCallQueue, SubagentConfig, SubagentError, SubagentTool,
+    TaskArgs,
+};
 pub use tools::BashTool;

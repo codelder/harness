@@ -5,7 +5,7 @@ pub const SPINNER_FRAMES: &[&str] = &["·", "✻", "✽", "✶", "✳", "✢"];
 
 /// Fun status messages that rotate during activity
 pub const FUN_MESSAGES: &[&str] = &[
-    "Beaming...",
+    "Germinating...",
     "Reasoning...",
     "Tracing...",
     "Planning...",
@@ -19,6 +19,7 @@ pub const FUN_MESSAGES: &[&str] = &[
 pub struct Spinner {
     frame_index: usize,
     message_index: usize,
+    started_at: Instant,
     last_update: Instant,
     frame_interval_ms: u64,
     message_interval_ms: u64,
@@ -29,6 +30,7 @@ impl Spinner {
         Self {
             frame_index: 0,
             message_index: 0,
+            started_at: Instant::now(),
             last_update: Instant::now(),
             frame_interval_ms: 150,    // Frame change every 150ms
             message_interval_ms: 2000, // Message change every 2s
@@ -52,10 +54,15 @@ impl Spinner {
         format!("{} {}", self.frame(), self.message())
     }
 
+    pub fn elapsed_seconds(&self) -> u64 {
+        self.started_at.elapsed().as_secs()
+    }
+
     /// Reset spinner to initial state
     pub fn reset(&mut self) {
         self.frame_index = 0;
         self.message_index = 0;
+        self.started_at = Instant::now();
         self.last_update = Instant::now();
     }
 

@@ -2,7 +2,7 @@ use crate::error::ProviderError;
 use crate::tools::{BashTool, ReadTool, WriteTool, EditTool, GlobTool, GrepTool, TodoTool};
 use crate::planning::TodoManager;
 use crate::agent::TodoUsageHook;
-use crate::subagent::{SubagentTool, SubagentConfig};
+use crate::subagent::{SharedSubagentCallQueue, SubagentConfig, SubagentTool};
 use std::sync::Arc;
 use tokio::sync::Mutex;
 use rig::agent::{Agent, AgentBuilder, PromptRequest};
@@ -307,6 +307,7 @@ pub fn create_parent_provider(
     thinking: bool,
     thinking_budget: u64,
     todo_manager: Arc<Mutex<TodoManager>>,
+    pending_subagent_calls: SharedSubagentCallQueue,
 ) -> Result<LlmProvider, ProviderError> {
     // Build SubagentConfig from the same parameters
     let subagent_config = SubagentConfig {
@@ -316,6 +317,7 @@ pub fn create_parent_provider(
         thinking,
         thinking_budget,
         max_turns: CHILD_MAX_TURNS,
+        pending_calls: pending_subagent_calls,
     };
     let subagent_tool = SubagentTool::new(subagent_config);
 

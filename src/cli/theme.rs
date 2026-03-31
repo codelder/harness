@@ -32,6 +32,10 @@ pub struct CliTheme {
     pub error: Style,
     /// Status/reminder style (blue)
     pub status: Style,
+    /// Active spinner headline style
+    pub activity: Style,
+    /// Active spinner metadata style
+    pub activity_meta: Style,
     /// Banner style (bold)
     pub banner: Style,
     /// Composer style (bold)
@@ -79,9 +83,7 @@ impl CliTheme {
             thinking: Style::default()
                 .fg(Color::Rgb(110, 110, 110))
                 .add_modifier(Modifier::ITALIC),
-            tool: Style::default()
-                .fg(Color::Rgb(130, 170, 240))
-                .add_modifier(Modifier::BOLD),
+            tool: Style::default().add_modifier(Modifier::BOLD),
             tool_result: Style::default(),
             tool_indicator: Style::default().fg(Color::Green),
             tool_executing_indicator: Style::default()
@@ -90,6 +92,10 @@ impl CliTheme {
             tool_result_highlight: Style::default().add_modifier(Modifier::BOLD),
             error: Style::default().fg(Color::Red).add_modifier(Modifier::BOLD),
             status: Style::default().fg(Color::Rgb(255, 165, 0)),
+            activity: Style::default()
+                .fg(Color::Rgb(220, 60, 80))
+                .add_modifier(Modifier::BOLD),
+            activity_meta: Style::default().fg(Color::Rgb(140, 140, 140)),
             banner: Style::default().add_modifier(Modifier::BOLD),
             composer: Style::default().add_modifier(Modifier::BOLD),
             composer_border: Style::default().fg(Color::Rgb(120, 120, 120)),
@@ -121,10 +127,7 @@ impl CliTheme {
             thinking: Style::default()
                 .fg(Color::Rgb(90, 90, 90))
                 .add_modifier(Modifier::ITALIC),
-            // Dark blue for light backgrounds — uses RGB to bypass ANSI color palette remapping
-            tool: Style::default()
-                .fg(Color::Rgb(20, 50, 120))
-                .add_modifier(Modifier::BOLD),
+            tool: Style::default().add_modifier(Modifier::BOLD),
             tool_result: Style::default().fg(Color::Rgb(60, 60, 60)),
             tool_indicator: Style::default().fg(Color::Rgb(0, 128, 0)),
             tool_executing_indicator: Style::default()
@@ -135,6 +138,10 @@ impl CliTheme {
                 .add_modifier(Modifier::BOLD),
             error: Style::default().fg(Color::Red).add_modifier(Modifier::BOLD),
             status: Style::default().fg(Color::Rgb(255, 165, 0)),
+            activity: Style::default()
+                .fg(Color::Rgb(180, 30, 50))
+                .add_modifier(Modifier::BOLD),
+            activity_meta: Style::default().fg(Color::Rgb(110, 110, 110)),
             banner: Style::default()
                 .fg(Color::Black)
                 .add_modifier(Modifier::BOLD),
@@ -334,14 +341,16 @@ mod tests {
     fn dark_theme_colors() {
         let theme = CliTheme::dark_theme();
         assert_eq!(theme.thinking.fg, Some(Color::Rgb(110, 110, 110)));
-        assert_eq!(theme.tool.fg, Some(Color::Rgb(130, 170, 240)));
+        assert_eq!(theme.tool.fg, None);
+        assert!(theme.tool.add_modifier.contains(Modifier::BOLD));
     }
 
     #[test]
     fn light_theme_colors() {
         let theme = CliTheme::light_theme();
         assert_eq!(theme.thinking.fg, Some(Color::Rgb(90, 90, 90)));
-        assert_eq!(theme.tool.fg, Some(Color::Rgb(20, 50, 120)));
+        assert_eq!(theme.tool.fg, None);
+        assert!(theme.tool.add_modifier.contains(Modifier::BOLD));
     }
 
     #[test]

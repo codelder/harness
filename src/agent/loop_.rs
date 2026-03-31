@@ -1,8 +1,10 @@
 use super::{AgentTurn, Message, Role};
 use crate::error::{classify_prompt_error, AgentError};
 use crate::frontend::{
-    FrontendEvent, FrontendEventSender, FrontendTodoItem, FrontendTodoStatus, SESSION_START_TURN_ID,
+    FrontendEvent, FrontendEventSender, FrontendSubagentToolUse, FrontendTodoItem,
+    FrontendTodoStatus, SESSION_START_TURN_ID,
 };
+use crate::subagent::{PendingSubagentCall, SharedSubagentCallQueue};
 use rig::agent::{HookAction, PromptHook, ToolCallHookAction};
 use rig::completion::{AssistantContent, CompletionModel};
 use rig::message::ReasoningContent;
@@ -11,6 +13,7 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 use std::time::Duration;
 use tokio::time::sleep;
+use tokio::sync::Mutex;
 
 /// Maximum number of retries for retryable errors
 const MAX_RETRIES: u32 = 3;
@@ -33,6 +36,20 @@ pub struct TodoUsageHook {
     turn_id: u64,
     /// Optional side channel for structured runtime/frontend events.
     event_tx: Option<FrontendEventSender>,
+    /// Shared queue that maps an in-flight `task` tool call to child progress events.
+    pending_subagent_calls: Option<SharedSubagentCallQueue>,
+    /// Optional child-subagent progress state for dynamic nested tool rendering.
+    subagent_progress: Option<SubagentProgressState>,
+    /// Running token totals for the current parent turn, updated after each model response.
+    token_totals: Arc<Mutex<(u64, u64, u64)>>,
+}
+
+#[derive(Clone)]
+struct SubagentProgressState {
+    parent_turn_id: u64,
+    parent_call_id: String,
+    event_tx: FrontendEventSender,
+    tools: Arc<tokio::sync::Mutex<Vec<FrontendSubagentToolUse>>>,
 }
 
 impl TodoUsageHook {
@@ -40,14 +57,42 @@ impl TodoUsageHook {
     ///
     /// Returns the hook and a clone of the flag that can be checked
     /// after agent execution completes.
-    pub fn new(turn_id: u64, event_tx: Option<FrontendEventSender>) -> (Self, Arc<AtomicBool>) {
+    pub fn new(
+        turn_id: u64,
+        event_tx: Option<FrontendEventSender>,
+        pending_subagent_calls: Option<SharedSubagentCallQueue>,
+    ) -> (Self, Arc<AtomicBool>) {
         let used_todo = Arc::new(AtomicBool::new(false));
         let hook = Self {
             used_todo: used_todo.clone(),
             turn_id,
             event_tx,
+            pending_subagent_calls,
+            subagent_progress: None,
+            token_totals: Arc::new(Mutex::new((0, 0, 0))),
         };
         (hook, used_todo)
+    }
+
+    pub fn for_subagent_progress(
+        parent_turn_id: u64,
+        parent_call_id: String,
+        event_tx: FrontendEventSender,
+    ) -> Self {
+        let progress = SubagentProgressState {
+            parent_turn_id,
+            parent_call_id,
+            event_tx: event_tx.clone(),
+            tools: Arc::new(tokio::sync::Mutex::new(Vec::new())),
+        };
+        Self {
+            used_todo: Arc::new(AtomicBool::new(false)),
+            turn_id: progress.parent_turn_id,
+            event_tx: Some(event_tx),
+            pending_subagent_calls: None,
+            subagent_progress: Some(progress),
+            token_totals: Arc::new(Mutex::new((0, 0, 0))),
+        }
     }
 
     async fn record_tool_call(
@@ -57,11 +102,40 @@ impl TodoUsageHook {
         internal_call_id: &str,
         args: &str,
     ) {
+        if let Some(progress) = &self.subagent_progress {
+            let mut tools = progress.tools.lock().await;
+            tools.push(FrontendSubagentToolUse {
+                name: tool_name.to_string(),
+                args_preview: args.to_string(),
+            });
+            let snapshot = tools.clone();
+            drop(tools);
+            let _ = progress
+                .event_tx
+                .emit(FrontendEvent::SubagentProgress {
+                    turn_id: progress.parent_turn_id,
+                    call_id: progress.parent_call_id.clone(),
+                    tools: snapshot,
+                })
+                .await;
+            return;
+        }
+
         if tool_name == "todo" {
             self.used_todo.store(true, Ordering::SeqCst);
         }
 
         let call_id = tool_call_id.unwrap_or_else(|| internal_call_id.to_string());
+
+        if tool_name == "task" {
+            if let (Some(queue), Some(event_tx)) = (&self.pending_subagent_calls, &self.event_tx) {
+                queue.lock().await.push_back(PendingSubagentCall {
+                    turn_id: self.turn_id,
+                    call_id: call_id.clone(),
+                    event_tx: event_tx.clone(),
+                });
+            }
+        }
         let args_preview = args.to_string();
 
         self.emit_event(FrontendEvent::ToolCallStarted {
@@ -81,6 +155,10 @@ impl TodoUsageHook {
         args: &str,
         result: &str,
     ) {
+        if self.subagent_progress.is_some() {
+            return;
+        }
+
         tracing::debug!(
             tool_name,
             result_len = result.len(),
@@ -177,11 +255,29 @@ impl TodoUsageHook {
             let _ = event_tx.emit(event).await;
         }
     }
+
+    async fn record_completion_usage(
+        &self,
+        usage: &rig::completion::Usage,
+    ) {
+        let mut totals = self.token_totals.lock().await;
+        totals.0 = totals.0.saturating_add(usage.input_tokens);
+        totals.1 = totals.1.saturating_add(usage.output_tokens);
+        totals.2 = totals.2.saturating_add(usage.total_tokens);
+
+        self.emit_event(FrontendEvent::TokenUsage {
+            turn_id: self.turn_id,
+            input_tokens: totals.0,
+            output_tokens: totals.1,
+            total_tokens: totals.2,
+        })
+        .await;
+    }
 }
 
 impl Default for TodoUsageHook {
     fn default() -> Self {
-        Self::new(SESSION_START_TURN_ID, None).0
+        Self::new(SESSION_START_TURN_ID, None, None).0
     }
 }
 
@@ -222,6 +318,8 @@ where
         _prompt: &rig::message::Message,
         response: &rig::completion::CompletionResponse<M::Response>,
     ) -> HookAction {
+        self.record_completion_usage(&response.usage).await;
+
         // Extract and display reasoning/thinking content
         for content in response.choice.iter() {
             if let AssistantContent::Reasoning(reasoning) = content {
@@ -509,7 +607,7 @@ mod tests {
     #[tokio::test]
     async fn hook_runtime_emits_tool_and_retry_events() {
         let (event_tx, mut event_rx) = frontend_event_channel(8);
-        let (hook, used_todo) = TodoUsageHook::new(7, Some(event_tx));
+        let (hook, used_todo) = TodoUsageHook::new(7, Some(event_tx), None);
 
         hook.record_tool_call(
             "todo",
@@ -576,7 +674,7 @@ mod tests {
     #[tokio::test]
     async fn hook_runtime_falls_back_to_internal_call_ids() {
         let (event_tx, mut event_rx) = frontend_event_channel(8);
-        let (hook, _used_todo) = TodoUsageHook::new(9, Some(event_tx));
+        let (hook, _used_todo) = TodoUsageHook::new(9, Some(event_tx), None);
 
         hook.record_tool_call("read", None, "internal-call", "{\"path\":\"README.md\"}")
             .await;
@@ -613,7 +711,7 @@ mod tests {
     #[tokio::test]
     async fn hook_runtime_emits_turn_scoped_streaming_events() {
         let (event_tx, mut event_rx) = frontend_event_channel(8);
-        let (hook, _used_todo) = TodoUsageHook::new(5, Some(event_tx));
+        let (hook, _used_todo) = TodoUsageHook::new(5, Some(event_tx), None);
 
         hook.record_thinking("reasoning".to_string()).await;
         hook.record_text_delta("delta").await;
@@ -630,6 +728,46 @@ mod tests {
             Some(FrontendEvent::AssistantMessageDelta {
                 turn_id: 5,
                 delta: "delta".to_string(),
+            })
+        );
+    }
+
+    #[tokio::test]
+    async fn hook_runtime_accumulates_token_usage_per_completion_round() {
+        let (event_tx, mut event_rx) = frontend_event_channel(8);
+        let (hook, _used_todo) = TodoUsageHook::new(11, Some(event_tx), None);
+
+        hook.record_completion_usage(&rig::completion::Usage {
+            input_tokens: 100,
+            output_tokens: 25,
+            total_tokens: 125,
+            cached_input_tokens: 0,
+        })
+        .await;
+        hook.record_completion_usage(&rig::completion::Usage {
+            input_tokens: 40,
+            output_tokens: 10,
+            total_tokens: 50,
+            cached_input_tokens: 0,
+        })
+        .await;
+
+        assert_eq!(
+            event_rx.recv().await,
+            Some(FrontendEvent::TokenUsage {
+                turn_id: 11,
+                input_tokens: 100,
+                output_tokens: 25,
+                total_tokens: 125,
+            })
+        );
+        assert_eq!(
+            event_rx.recv().await,
+            Some(FrontendEvent::TokenUsage {
+                turn_id: 11,
+                input_tokens: 140,
+                output_tokens: 35,
+                total_tokens: 175,
             })
         );
     }

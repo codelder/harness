@@ -5,6 +5,8 @@ use schemars::JsonSchema;
 use crate::llm::{create_provider, ProviderType};
 use crate::agent::{agent_loop, TodoUsageHook};
 use crate::planning::TodoManager;
+use crate::frontend::FrontendEventSender;
+use std::collections::VecDeque;
 use std::sync::Arc;
 use tokio::sync::Mutex;
 
@@ -29,7 +31,7 @@ pub enum SubagentError {
 ///
 /// Holds provider configuration (NOT a provider instance) to prevent
 /// recursion -- child agents must not inherit the parent's `task` tool.
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone)]
 pub struct SubagentConfig {
     pub provider_type: ProviderType,
     pub model: String,
@@ -37,7 +39,29 @@ pub struct SubagentConfig {
     pub thinking: bool,
     pub thinking_budget: u64,
     pub max_turns: usize,
+    pub pending_calls: SharedSubagentCallQueue,
 }
+
+impl PartialEq for SubagentConfig {
+    fn eq(&self, other: &Self) -> bool {
+        self.provider_type == other.provider_type
+            && self.model == other.model
+            && self.base_url == other.base_url
+            && self.thinking == other.thinking
+            && self.thinking_budget == other.thinking_budget
+            && self.max_turns == other.max_turns
+            && Arc::ptr_eq(&self.pending_calls, &other.pending_calls)
+    }
+}
+
+#[derive(Debug, Clone)]
+pub struct PendingSubagentCall {
+    pub turn_id: u64,
+    pub call_id: String,
+    pub event_tx: FrontendEventSender,
+}
+
+pub type SharedSubagentCallQueue = Arc<Mutex<VecDeque<PendingSubagentCall>>>;
 
 /// System prompt for child agents.
 ///
@@ -52,6 +76,7 @@ Return a clear summary of what you did and what you found."#;
 /// Maximum length of result text returned to parent agent.
 const MAX_RESULT_LENGTH: usize = 10_000;
 const TRUNCATION_SUFFIX: &str = "\n... (truncated)";
+const PROMPT_LOG_PREVIEW_CHARS: usize = 80;
 
 /// Tool that spawns an isolated child agent to handle a subtask.
 ///
@@ -89,10 +114,10 @@ impl Tool for SubagentTool {
     }
 
     async fn call(&self, args: Self::Args) -> Result<Self::Output, Self::Error> {
-        let preview_len = args.prompt.len().min(80);
+        let prompt_preview = truncate_chars(&args.prompt, PROMPT_LOG_PREVIEW_CHARS);
         tracing::info!(
             "Subagent spawned for prompt: {}...",
-            &args.prompt[..preview_len]
+            prompt_preview
         );
 
         // Create a fresh TodoManager for the child agent.
@@ -112,11 +137,24 @@ impl Tool for SubagentTool {
 
         // Run agent_loop with empty history -- key context isolation (CROSS-03).
         // Child starts with no parent context, only its assigned prompt.
+        let pending = {
+            let mut queue = self.config.pending_calls.lock().await;
+            queue.pop_front()
+        };
+
         match agent_loop(
             &[],
             &args.prompt,
             &provider,
-            TodoUsageHook::default(),
+            pending
+                .map(|pending| {
+                    TodoUsageHook::for_subagent_progress(
+                        pending.turn_id,
+                        pending.call_id,
+                        pending.event_tx,
+                    )
+                })
+                .unwrap_or_default(),
         )
         .await
         {
@@ -153,6 +191,19 @@ impl Tool for SubagentTool {
     }
 }
 
+fn truncate_chars(text: &str, max_chars: usize) -> &str {
+    if text.chars().count() <= max_chars {
+        return text;
+    }
+
+    let end = text
+        .char_indices()
+        .nth(max_chars)
+        .map(|(idx, _)| idx)
+        .unwrap_or(text.len());
+    &text[..end]
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -180,6 +231,7 @@ mod tests {
             thinking: false,
             thinking_budget: 0,
             max_turns: 30,
+            pending_calls: Arc::new(Mutex::new(VecDeque::new())),
         };
         assert_eq!(config.provider_type, ProviderType::Anthropic);
         assert_eq!(config.model, "claude-3-5-sonnet-20241022");
@@ -196,6 +248,7 @@ mod tests {
             thinking: true,
             thinking_budget: 5000,
             max_turns: 30,
+            pending_calls: Arc::new(Mutex::new(VecDeque::new())),
         };
         let cloned = config.clone();
         assert_eq!(config, cloned);
@@ -219,6 +272,7 @@ mod tests {
             thinking: false,
             thinking_budget: 0,
             max_turns: 30,
+            pending_calls: Arc::new(Mutex::new(VecDeque::new())),
         };
         let tool = SubagentTool::new(config);
         let definition = tool.definition("test".to_string()).await;
@@ -260,5 +314,13 @@ mod tests {
             short_response.clone()
         };
         assert_eq!(result, short_response);
+    }
+
+    #[test]
+    fn truncate_chars_is_utf8_safe() {
+        let text = "请分析当前项目，并使用todo工具来跟踪";
+        let preview = truncate_chars(text, 10);
+        assert!(text.starts_with(preview));
+        assert!(preview.is_char_boundary(preview.len()));
     }
 }

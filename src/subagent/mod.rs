@@ -1,3 +1,6 @@
 mod tool;
 
-pub use tool::{SubagentConfig, SubagentError, SubagentTool, TaskArgs};
+pub use tool::{
+    PendingSubagentCall, SharedSubagentCallQueue, SubagentConfig, SubagentError, SubagentTool,
+    TaskArgs,
+};

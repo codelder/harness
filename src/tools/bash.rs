@@ -39,28 +39,12 @@ pub enum BashError {
 /// huge payloads to the LLM.
 const MAX_OUTPUT_SIZE: usize = 50_000;
 
-/// Find a safe char boundary at or before the target index.
-/// This is a compatibility function for Rust versions before 1.91.0.
-fn floor_char_boundary(s: &str, target: usize) -> usize {
-    let target = target.min(s.len());
-    if target == 0 || target == s.len() {
-        return target;
-    }
-
-    // Walk back to find a valid char boundary
-    let mut idx = target;
-    while idx > 0 && !s.is_char_boundary(idx) {
-        idx -= 1;
-    }
-    idx
-}
-
 /// Truncate output to MAX_OUTPUT_SIZE, appending a summary if truncated.
 fn truncate_output(output: &str) -> String {
     if output.len() <= MAX_OUTPUT_SIZE {
         return output.to_string();
     }
-    let truncated = &output[..floor_char_boundary(output, MAX_OUTPUT_SIZE).min(MAX_OUTPUT_SIZE)];
+    let truncated = &output[..output.floor_char_boundary(MAX_OUTPUT_SIZE)];
     let total_lines = output.lines().count();
     let kept_lines = truncated.lines().count();
     format!(

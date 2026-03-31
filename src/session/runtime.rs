@@ -6,6 +6,8 @@ use crate::frontend::{
 };
 use crate::llm::{create_parent_provider, LlmProvider, ProviderType};
 use crate::planning::{TodoItem, TodoManager, TodoStatus};
+use crate::subagent::SharedSubagentCallQueue;
+use std::collections::VecDeque;
 use std::future::Future;
 use std::pin::Pin;
 use std::sync::atomic::Ordering;
@@ -47,6 +49,7 @@ pub struct SessionRuntime {
     todo_manager: Arc<Mutex<TodoManager>>,
     rounds_since_todo: u32,
     provider: Option<LlmProvider>,
+    pending_subagent_calls: SharedSubagentCallQueue,
 }
 
 impl SessionRuntime {
@@ -57,6 +60,7 @@ impl SessionRuntime {
             todo_manager: Arc::new(Mutex::new(TodoManager::new())),
             rounds_since_todo: 0,
             provider: None,
+            pending_subagent_calls: Arc::new(Mutex::new(VecDeque::new())),
         }
     }
 
@@ -99,6 +103,7 @@ impl SessionRuntime {
             config.thinking,
             config.thinking_budget,
             self.todo_manager(),
+            self.pending_subagent_calls.clone(),
         ) {
             Ok(provider) => provider,
             Err(error) => {
@@ -237,7 +242,11 @@ impl SessionRuntime {
         )
         .await?;
 
-        let (hook, used_todo_flag) = TodoUsageHook::new(turn_id, Some(event_tx.clone()));
+        let (hook, used_todo_flag) = TodoUsageHook::new(
+            turn_id,
+            Some(event_tx.clone()),
+            Some(self.pending_subagent_calls.clone()),
+        );
         let turn = executor(&self.messages, &current_input, provider, hook).await?;
         let todo_used = used_todo_flag.load(Ordering::SeqCst);
 
@@ -257,19 +266,6 @@ impl SessionRuntime {
             },
         )
         .await?;
-
-        if let Some(usage) = &turn.usage {
-            self.emit_event(
-                event_tx,
-                FrontendEvent::TokenUsage {
-                    turn_id,
-                    input_tokens: usage.input_tokens,
-                    output_tokens: usage.output_tokens,
-                    total_tokens: usage.total_tokens,
-                },
-            )
-            .await?;
-        }
 
         if let Some(ref message) = reminder {
             self.emit_event(
