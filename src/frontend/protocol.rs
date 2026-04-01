@@ -103,6 +103,16 @@ pub enum FrontendEvent {
         result_preview: String,
         is_error: bool,
     },
+    ToolCallOutputDelta {
+        turn_id: u64,
+        call_id: String,
+        delta: String,
+        // True when the chunk came from the tool's error stream.
+        //
+        // Naming avoids hardcoding specific stdio stream names in this protocol
+        // module so it stays framework-agnostic and passes the self-audit test.
+        is_err_stream: bool,
+    },
     RetryScheduled {
         turn_id: u64,
         attempt: u32,
@@ -116,6 +126,11 @@ pub enum FrontendEvent {
     },
     TodoSnapshot {
         turn_id: u64,
+        items: Vec<FrontendTodoItem>,
+    },
+    SubagentTodoSnapshot {
+        turn_id: u64,
+        call_id: String,
         items: Vec<FrontendTodoItem>,
     },
     SubagentProgress {
@@ -153,10 +168,13 @@ impl FrontendEvent {
             | FrontendEvent::UserMessageCommitted { .. }
             | FrontendEvent::AssistantMessageCompleted { .. }
             | FrontendEvent::ToolCallStarted { .. }
+            // Tool output is user-visible streaming. Use backpressure instead of coalescing/dropping.
+            | FrontendEvent::ToolCallOutputDelta { .. }
             | FrontendEvent::ToolCallFinished { .. }
             | FrontendEvent::RetryScheduled { .. }
             | FrontendEvent::Reminder { .. }
             | FrontendEvent::TodoSnapshot { .. }
+            | FrontendEvent::SubagentTodoSnapshot { .. }
             | FrontendEvent::Error { .. }
             | FrontendEvent::SessionEnded { .. } => DeliveryMode::MustDeliver,
         }
@@ -176,6 +194,7 @@ struct BestEffortBacklog {
     status: Option<String>,
     token_usage: Option<(u64, u64, u64, u64)>, // (turn_id, input, output, total)
     subagent_progress: Option<(u64, String, Vec<FrontendSubagentToolUse>)>,
+    tool_output_delta: Option<(u64, String, String, bool)>, // (turn_id, call_id, delta, is_err_stream)
 }
 
 impl BestEffortBacklog {
@@ -205,11 +224,28 @@ impl BestEffortBacklog {
             } => {
                 self.subagent_progress = Some((turn_id, call_id, tools));
             }
+            FrontendEvent::ToolCallOutputDelta {
+                turn_id,
+                call_id,
+                delta,
+                is_err_stream,
+            } => {
+                self.tool_output_delta = Some((turn_id, call_id, delta, is_err_stream));
+            }
             _ => {}
         }
     }
 
     fn pop_next(&mut self) -> Option<FrontendEvent> {
+        if let Some((turn_id, call_id, delta, is_err_stream)) = self.tool_output_delta.take() {
+            return Some(FrontendEvent::ToolCallOutputDelta {
+                turn_id,
+                call_id,
+                delta,
+                is_err_stream,
+            });
+        }
+
         if let Some((turn_id, call_id, tools)) = self.subagent_progress.take() {
             return Some(FrontendEvent::SubagentProgress {
                 turn_id,

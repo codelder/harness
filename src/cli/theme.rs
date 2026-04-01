@@ -54,6 +54,14 @@ pub struct CliTheme {
     pub table_cell: Style,
     /// Footer/todo style
     pub footer: Style,
+    /// Todo connector and header style
+    pub todo_connector: Style,
+    /// Pending todo style
+    pub todo_pending: Style,
+    /// In-progress todo style
+    pub todo_in_progress: Style,
+    /// Completed todo style
+    pub todo_completed: Style,
 }
 
 impl CliTheme {
@@ -93,7 +101,7 @@ impl CliTheme {
             error: Style::default().fg(Color::Red).add_modifier(Modifier::BOLD),
             status: Style::default().fg(Color::Rgb(255, 165, 0)),
             activity: Style::default()
-                .fg(Color::Rgb(220, 60, 80))
+                .fg(Color::Rgb(235, 155, 70))
                 .add_modifier(Modifier::BOLD),
             activity_meta: Style::default().fg(Color::Rgb(140, 140, 140)),
             banner: Style::default().add_modifier(Modifier::BOLD),
@@ -109,6 +117,14 @@ impl CliTheme {
                 .add_modifier(Modifier::BOLD),
             table_cell: Style::default().fg(Color::Rgb(230, 230, 230)),
             footer: Style::default().fg(Color::Magenta),
+            todo_connector: Style::default().fg(Color::Rgb(170, 170, 170)),
+            todo_pending: Style::default().fg(Color::Rgb(225, 225, 225)),
+            todo_in_progress: Style::default()
+                .fg(Color::Rgb(235, 155, 70))
+                .add_modifier(Modifier::BOLD),
+            todo_completed: Style::default()
+                .fg(Color::Rgb(120, 120, 120))
+                .add_modifier(Modifier::CROSSED_OUT),
         }
     }
 
@@ -139,7 +155,7 @@ impl CliTheme {
             error: Style::default().fg(Color::Red).add_modifier(Modifier::BOLD),
             status: Style::default().fg(Color::Rgb(255, 165, 0)),
             activity: Style::default()
-                .fg(Color::Rgb(180, 30, 50))
+                .fg(Color::Rgb(155, 95, 20))
                 .add_modifier(Modifier::BOLD),
             activity_meta: Style::default().fg(Color::Rgb(110, 110, 110)),
             banner: Style::default()
@@ -159,6 +175,14 @@ impl CliTheme {
                 .add_modifier(Modifier::BOLD),
             table_cell: Style::default().fg(Color::Rgb(30, 30, 30)),
             footer: Style::default().fg(Color::Rgb(128, 0, 128)),
+            todo_connector: Style::default().fg(Color::Rgb(130, 130, 130)),
+            todo_pending: Style::default().fg(Color::Black),
+            todo_in_progress: Style::default()
+                .fg(Color::Rgb(155, 95, 20))
+                .add_modifier(Modifier::BOLD),
+            todo_completed: Style::default()
+                .fg(Color::Rgb(110, 110, 110))
+                .add_modifier(Modifier::CROSSED_OUT),
         }
     }
 }

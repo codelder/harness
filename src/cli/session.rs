@@ -3,9 +3,12 @@ use crate::cli::terminal::{spawn_input_listener, InputEvent, TerminalGuard};
 use crate::error::{AgentError, ProviderError};
 use crate::frontend::{
     frontend_command_channel, frontend_event_channel, send_frontend_command, FrontendCommand,
-    FrontendCommandReceiver, FrontendCommandSender, FrontendEventReceiver, FrontendEventSender,
+    FrontendCommandReceiver, FrontendCommandSender, FrontendEvent, FrontendEventReceiver,
+    FrontendEventSender,
 };
-use crate::session::{SessionRuntime, SessionRuntimeConfig, SessionRuntimeOutcome};
+use crate::session::{CompletedTurn, SessionRuntime, SessionRuntimeConfig};
+#[cfg(test)]
+use crate::session::SessionRuntimeOutcome;
 use ratatui::prelude::Widget;
 use ratatui::widgets::Paragraph;
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -146,17 +149,28 @@ impl Session {
         event_rx: &mut FrontendEventReceiver,
         input_rx: &mut mpsc::UnboundedReceiver<InputEvent>,
     ) -> Result<(), AgentError> {
+        let mut needs_redraw = true;
+        let mut viewport_height = terminal.viewport_height();
         loop {
-            Self::drain_events_and_flush(app, event_rx, event_tx).await?;
-            app.tick();
-
-            terminal
-                .set_viewport_height(app.desired_viewport_height())
+            let drained_events = Self::drain_events_and_flush(app, event_rx, event_tx).await?;
+            let tick_changed = app.tick();
+            let desired_viewport_height = app.desired_viewport_height();
+            let target_viewport_height = if desired_viewport_height > viewport_height {
+                desired_viewport_height
+            } else if desired_viewport_height < viewport_height && app.allow_viewport_shrink() {
+                desired_viewport_height
+            } else {
+                viewport_height
+            };
+            let viewport_changed = terminal
+                .set_viewport_height(target_viewport_height)
                 .map_err(terminal_error)?;
+            viewport_height = target_viewport_height;
 
             // Insert new timeline content above the viewport
             let new_lines = app.drain_new_lines();
-            if !new_lines.is_empty() {
+            let inserted_new_lines = !new_lines.is_empty();
+            if inserted_new_lines {
                 let height = new_lines.len() as u16;
                 terminal
                     .insert_before(height, |buf| {
@@ -184,10 +198,14 @@ impl Session {
                     .map_err(terminal_error)?;
             }
 
-            // Render viewport (dynamic: tools/todo/composer/status)
-            terminal
-                .draw(|frame| app.render(frame))
-                .map_err(terminal_error)?;
+            needs_redraw |= drained_events || tick_changed || viewport_changed || inserted_new_lines;
+
+            if needs_redraw {
+                terminal
+                    .draw(|frame| app.render(frame))
+                    .map_err(terminal_error)?;
+                needs_redraw = false;
+            }
 
             if app.should_exit() {
                 return Ok(());
@@ -199,6 +217,7 @@ impl Session {
                 maybe_event = input_rx.recv() => {
                     match maybe_event {
                         Some(InputEvent::Key(key)) => {
+                            needs_redraw = true;
                             if let Some(command) = app.handle_key_event(key) {
                                 if matches!(command, FrontendCommand::Exit) {
                                     app.mark_exit_requested();
@@ -209,21 +228,22 @@ impl Session {
                             }
                         }
                         Some(InputEvent::Resize(_columns, _rows)) => {
+                            needs_redraw = true;
                             let _ = terminal.handle_resize();
                         }
                         None => return Ok(()),
                     }
                 }
-                _ = tokio::time::sleep(Duration::from_millis(150)) => {
-                    // Slower animation rate (150ms instead of 50ms) to reduce scroll churn
-                    app.tick();
+                _ = tokio::time::sleep(Duration::from_millis(80)) => {
+                    // Keep spinner and token interpolation smooth without over-redrawing.
+                    needs_redraw |= app.tick();
                     flush_best_effort(event_tx).await?;
                 }
             }
         }
     }
 
-    fn drain_events(app: &mut CliApp, event_rx: &mut FrontendEventReceiver) {
+    fn drain_events(app: &mut CliApp, event_rx: &mut FrontendEventReceiver) -> bool {
         let mut count = 0;
         while let Ok(event) = event_rx.try_recv() {
             tracing::debug!("UI received event: {:?}", std::mem::discriminant(&event));
@@ -237,15 +257,17 @@ impl Session {
                 app.executing_tool_count()
             );
         }
+        count > 0
     }
 
     async fn drain_events_and_flush(
         app: &mut CliApp,
         event_rx: &mut FrontendEventReceiver,
         event_tx: &FrontendEventSender,
-    ) -> Result<(), AgentError> {
-        Self::drain_events(app, event_rx);
-        flush_best_effort(event_tx).await
+    ) -> Result<bool, AgentError> {
+        let drained = Self::drain_events(app, event_rx);
+        flush_best_effort(event_tx).await?;
+        Ok(drained)
     }
 }
 
@@ -260,12 +282,78 @@ async fn run_runtime_loop(
     mut command_rx: FrontendCommandReceiver,
     event_tx: crate::frontend::FrontendEventSender,
 ) -> Result<SessionRuntime, AgentError> {
-    while let Some(command) = command_rx.recv().await {
-        if matches!(
-            runtime.handle_command(command, &event_tx).await?,
-            SessionRuntimeOutcome::Exit(_)
-        ) {
-            break;
+    let mut active_turn: Option<(
+        u64,
+        tokio::task::JoinHandle<Result<CompletedTurn, AgentError>>,
+    )> = None;
+
+    loop {
+        if let Some((_, handle)) = active_turn.as_mut() {
+            tokio::select! {
+                result = handle => {
+                    let result = result.map_err(join_error)?;
+                    active_turn = None;
+                    runtime.finish_turn(result?, &event_tx).await?;
+                }
+                maybe_command = command_rx.recv() => {
+                    match maybe_command {
+                        Some(FrontendCommand::Interrupt) => {
+                            let (turn_id, handle) = active_turn.take().expect("active turn");
+                            runtime.interrupt_active_turn(turn_id, &event_tx, handle).await?;
+                        }
+                        Some(FrontendCommand::Exit) => {
+                            let (turn_id, handle) = active_turn.take().expect("active turn");
+                            runtime.interrupt_active_turn(turn_id, &event_tx, handle).await?;
+                            break;
+                        }
+                        Some(FrontendCommand::SubmitMessage(_)) => {
+                            event_tx
+                                .emit(FrontendEvent::Status {
+                                    message: "Already processing a request".to_string(),
+                                })
+                                .await
+                                .map_err(frontend_event_channel_closed)?;
+                        }
+                        None => break,
+                    }
+                }
+            }
+        } else {
+            let Some(command) = command_rx.recv().await else {
+                break;
+            };
+
+            match command {
+                FrontendCommand::SubmitMessage(text) => {
+                    let error_turn_id = runtime.active_turn_id();
+                    match runtime.begin_turn(text, &event_tx).await {
+                        Ok(pending) => {
+                            let turn_id = pending.turn_id;
+                            let event_tx_clone = event_tx.clone();
+                            let pending_calls = runtime.pending_subagent_calls();
+                            let handle = tokio::spawn(async move {
+                                SessionRuntime::execute_turn(pending, event_tx_clone, pending_calls).await
+                            });
+                            active_turn = Some((turn_id, handle));
+                        }
+                        Err(error) => {
+                            event_tx
+                                .emit(FrontendEvent::Error {
+                                    turn_id: error_turn_id,
+                                    message: error.to_string(),
+                                })
+                                .await
+                                .map_err(frontend_event_channel_closed)?;
+                        }
+                    }
+                }
+                FrontendCommand::Interrupt => {
+                    runtime.handle_command(FrontendCommand::Interrupt, &event_tx).await?;
+                }
+                FrontendCommand::Exit => {
+                    break;
+                }
+            }
         }
     }
 

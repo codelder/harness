@@ -24,6 +24,8 @@ const TOOL_RESULT_LINE_CHARS: usize = 160;
 const BASH_OUTPUT_INLINE_MAX_LINES: usize = 8;
 const BASH_OUTPUT_INLINE_MAX_CHARS: usize = 600;
 const BASH_OUTPUT_TAIL_LINES: usize = 3;
+const BASH_LIVE_OUTPUT_LINES: usize = 4;
+const MAX_LIVE_OUTPUT_CHARS: usize = 50_000;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 struct ToolBlock {
@@ -34,6 +36,8 @@ struct ToolBlock {
     result_preview: Option<String>,
     is_error: bool,
     subagent_tools: Vec<FrontendSubagentToolUse>,
+    subagent_todo: Vec<FrontendTodoItem>,
+    live_output: String,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -82,6 +86,14 @@ enum PlannedExecutingLine {
     Header { name: String, args: String },
     SubagentTool { prefix: String, text: String },
     Folded { count: usize },
+    OutputLine { prefix: String, text: String },
+    FoldedOutput { count: usize },
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct SubagentTodoBlock {
+    header: String,
+    items: Vec<FrontendTodoItem>,
 }
 
 /// Reducer-owned UI state for the terminal adapter.
@@ -205,6 +217,8 @@ impl CliApp {
                     result_preview: None,
                     is_error: false,
                     subagent_tools: Vec::new(),
+                    subagent_todo: Vec::new(),
+                    live_output: String::new(),
                 }));
             }
             FrontendEvent::ToolCallFinished {
@@ -250,7 +264,51 @@ impl CliApp {
                         result_preview: Some(result_preview),
                         is_error,
                         subagent_tools: Vec::new(),
+                        subagent_todo: Vec::new(),
+                        live_output: String::new(),
                     }));
+                }
+            }
+            FrontendEvent::ToolCallOutputDelta { turn_id, call_id, delta, .. } => {
+                if let Some(TimelineBlock::Tool(tool)) =
+                    self.timeline.iter_mut().rev().find(|block| {
+                        matches!(
+                            block,
+                            TimelineBlock::Tool(t) if t.turn_id == turn_id && t.call_id == call_id
+                        )
+                    })
+                {
+                    tool.live_output.push_str(&delta);
+                    if tool.live_output.chars().count() > MAX_LIVE_OUTPUT_CHARS {
+                        let keep_from = tool
+                            .live_output
+                            .chars()
+                            .count()
+                            .saturating_sub(MAX_LIVE_OUTPUT_CHARS);
+                        let start = tool
+                            .live_output
+                            .char_indices()
+                            .nth(keep_from)
+                            .map(|(idx, _)| idx)
+                            .unwrap_or(0);
+                        tool.live_output = tool.live_output[start..].to_string();
+                    }
+                }
+            }
+            FrontendEvent::SubagentTodoSnapshot {
+                turn_id,
+                call_id,
+                items,
+            } => {
+                if let Some(TimelineBlock::Tool(tool)) =
+                    self.timeline.iter_mut().rev().find(|block| {
+                        matches!(
+                            block,
+                            TimelineBlock::Tool(t) if t.turn_id == turn_id && t.call_id == call_id
+                        )
+                    })
+                {
+                    tool.subagent_todo = items;
                 }
             }
             FrontendEvent::SubagentProgress {
@@ -330,6 +388,13 @@ impl CliApp {
                 }
             }
             FrontendEvent::Status { message } => {
+                if message == "Interrupted" {
+                    self.streaming_assistant = None;
+                    self.awaiting_assistant = false;
+                    self.spinner.reset();
+                    self.status = message;
+                    return;
+                }
                 self.timeline.push(TimelineBlock::Note {
                     turn_id: None,
                     kind: NoteKind::Status,
@@ -338,6 +403,19 @@ impl CliApp {
                 self.status = message;
             }
             FrontendEvent::Error { turn_id, message } => {
+                if message == "Interrupted" {
+                    self.streaming_assistant = None;
+                    self.awaiting_assistant = false;
+                    self.spinner.reset();
+                    for block in &mut self.timeline {
+                        if let TimelineBlock::Tool(tool) = block {
+                            if tool.turn_id == turn_id && tool.result_preview.is_none() {
+                                tool.result_preview = Some("Interrupted".to_string());
+                                tool.is_error = true;
+                            }
+                        }
+                    }
+                }
                 self.timeline.push(TimelineBlock::Note {
                     turn_id: Some(turn_id),
                     kind: NoteKind::Error,
@@ -409,9 +487,10 @@ impl CliApp {
         }
     }
 
-    pub fn tick(&mut self) {
-        self.animate_token_display();
-        let _ = self.spinner.frame();
+    pub fn tick(&mut self) -> bool {
+        let tokens_changed = self.animate_token_display();
+        let spinner_changed = self.spinner.tick();
+        tokens_changed || spinner_changed
     }
 
     /// Number of tool blocks currently executing (no result yet).
@@ -438,9 +517,7 @@ impl CliApp {
     }
 
     fn visible_activity_rows(&self) -> u16 {
-        if (self.awaiting_assistant || self.streaming_assistant.is_some())
-            && self.executing_tool_count() == 0
-        {
+        if self.awaiting_assistant || self.streaming_assistant.is_some() {
             ACTIVITY_ROWS
         } else {
             0
@@ -448,11 +525,23 @@ impl CliApp {
     }
 
     fn visible_todo_rows(&self) -> u16 {
-        if !self.should_show_todo_footer() {
+        let subagent_rows: usize = self
+            .subagent_todo_blocks()
+            .iter()
+            .map(|block| 1 + block.items.len())
+            .sum();
+        let main_rows = if self.should_show_todo_footer() {
+            1 + self.todo_footer.len()
+        } else {
+            0
+        };
+
+        let total_rows = subagent_rows + main_rows;
+        if total_rows == 0 {
             return 0;
         }
 
-        1 + u16::try_from(self.todo_footer.len()).unwrap_or(u16::MAX.saturating_sub(1))
+        u16::try_from(total_rows).unwrap_or(u16::MAX)
     }
 
     fn tool_todo_gap_rows(&self) -> u16 {
@@ -484,6 +573,39 @@ impl CliApp {
             if tool.name == "task" {
                 lines.extend(self.subagent_tool_usage_lines(tool));
             }
+            if tool.name == "bash" {
+                lines.extend(self.live_output_lines(tool));
+            }
+        }
+
+        lines
+    }
+
+    fn live_output_lines(&self, tool: &ToolBlock) -> Vec<PlannedExecutingLine> {
+        if tool.live_output.is_empty() {
+            return Vec::new();
+        }
+
+        let all_lines: Vec<&str> = tool.live_output.lines().collect();
+        let visible = all_lines.len().min(BASH_LIVE_OUTPUT_LINES);
+        let hidden = all_lines.len().saturating_sub(visible);
+        let start = all_lines.len().saturating_sub(visible);
+
+        let mut lines = all_lines[start..]
+            .iter()
+            .enumerate()
+            .map(|(index, line)| PlannedExecutingLine::OutputLine {
+                prefix: if index == 0 {
+                    "  └ ".to_string()
+                } else {
+                    "    ".to_string()
+                },
+                text: truncate_str(line, TOOL_RESULT_LINE_CHARS),
+            })
+            .collect::<Vec<_>>();
+
+        if hidden > 0 {
+            lines.push(PlannedExecutingLine::FoldedOutput { count: hidden });
         }
 
         lines
@@ -560,6 +682,14 @@ impl CliApp {
                 ]),
                 PlannedExecutingLine::Folded { count } => Line::styled(
                     format!("  +{} more tool uses (ctrl+b to expand)", count),
+                    self.theme.status,
+                ),
+                PlannedExecutingLine::OutputLine { prefix, text } => Line::from(vec![
+                    Span::styled(prefix, self.theme.tool_result),
+                    Span::styled(text, self.theme.tool_result),
+                ]),
+                PlannedExecutingLine::FoldedOutput { count } => Line::styled(
+                    format!("  +{} more output lines", count),
                     self.theme.status,
                 ),
             })
@@ -675,7 +805,11 @@ impl CliApp {
         let composer = Paragraph::new(self.render_composer_lines(composer_area.width))
             .wrap(Wrap { trim: false });
         frame.render_widget(composer, composer_area);
-        if self.streaming_assistant.is_none() && composer_area.height > 1 && composer_area.width > 0 {
+        if !self.awaiting_assistant
+            && self.streaming_assistant.is_none()
+            && composer_area.height > 1
+            && composer_area.width > 0
+        {
             frame.set_cursor_position(self.composer_cursor_position(composer_area));
         }
 
@@ -706,12 +840,11 @@ impl CliApp {
     }
 
     fn status_line(&mut self) -> Line<'static> {
-        let total_tokens = self.displayed_input_tokens + self.displayed_output_tokens;
-        let token_info = if total_tokens > 0 {
-            format!("{} tokens | ", total_tokens)
-        } else {
-            String::new()
-        };
+        let token_info = format!(
+            "↑ {} ↓ {} | ",
+            format_token_slot(self.displayed_input_tokens),
+            format_token_slot(self.displayed_output_tokens)
+        );
 
         let status = self.status.clone();
         let subagent_hint = if self
@@ -731,25 +864,43 @@ impl CliApp {
     }
 
     fn activity_line(&mut self) -> Line<'static> {
-        let seconds = self.spinner.elapsed_seconds();
-        let tokens = self.displayed_input_tokens + self.displayed_output_tokens;
+        if self.executing_tool_count() > 0 {
+            // Keep layout stable while tools run; avoid toggling activity row on/off.
+            return Line::styled(" ", self.theme.activity_meta);
+        }
+
+        let elapsed = format_duration_slot(self.spinner.elapsed_seconds());
         let frame = self.spinner.frame().to_string();
-        let message = self.spinner.message().replace("...", "...");
+        let message = self.spinner.message().to_string();
+        let token_info = format!(
+            " · ↑ {} · ↓ {}",
+            format_token_slot(self.displayed_input_tokens),
+            format_token_slot(self.displayed_output_tokens)
+        );
         Line::from(vec![
             Span::styled(format!("{} ", frame), self.theme.activity),
             Span::styled(message, self.theme.activity),
             Span::styled(
-                format!(" ({}s · {} tokens · thinking)", seconds, tokens),
+                format!(" ({}{} · thinking)", elapsed, token_info),
                 self.theme.activity_meta,
             ),
         ])
     }
 
-    fn animate_token_display(&mut self) {
+    fn animate_token_display(&mut self) -> bool {
+        let prev_input = self.displayed_input_tokens;
+        let prev_output = self.displayed_output_tokens;
         self.displayed_input_tokens =
-            advance_towards(self.displayed_input_tokens, self.target_input_tokens);
+            advance_towards(self.displayed_input_tokens, self.target_input_tokens, 256);
         self.displayed_output_tokens =
-            advance_towards(self.displayed_output_tokens, self.target_output_tokens);
+            advance_towards(self.displayed_output_tokens, self.target_output_tokens, 256);
+        self.displayed_input_tokens != prev_input || self.displayed_output_tokens != prev_output
+    }
+
+    pub fn allow_viewport_shrink(&self) -> bool {
+        self.executing_tool_count() == 0
+            && !self.awaiting_assistant
+            && self.streaming_assistant.is_none()
     }
 
     fn render_composer_lines(&self, width: u16) -> Vec<Line<'static>> {
@@ -797,31 +948,63 @@ impl CliApp {
     }
 
     fn render_todo_footer_lines(&self, max_lines: usize) -> Vec<Line<'static>> {
-        if !self.should_show_todo_footer() || max_lines == 0 {
+        if max_lines == 0 {
             return Vec::new();
         }
 
-        let completed = self
-            .todo_footer
-            .iter()
-            .filter(|item| item.status == FrontendTodoStatus::Completed)
-            .count();
-        let total = self.todo_footer.len();
+        let mut lines = Vec::new();
+        let mut remaining = max_lines;
 
-        let mut lines = vec![Line::styled(
-            format!("Tasks ({completed}/{total})"),
-            self.theme.footer,
-        )];
+        for block in self.subagent_todo_blocks() {
+            if remaining == 0 {
+                break;
+            }
+            let mut block_lines = render_todo_block_lines(
+                &block.header,
+                &block.items,
+                &self.theme,
+                lines.is_empty() && self.visible_activity_rows() > 0,
+                remaining,
+            );
+            remaining = remaining.saturating_sub(block_lines.len());
+            lines.append(&mut block_lines);
+        }
 
-        let item_rows = max_lines.saturating_sub(1);
-        for item in self.todo_footer.iter().take(item_rows) {
-            lines.push(Line::styled(
-                format!("  {}", format_todo_item(item)),
-                self.theme.footer,
-            ));
+        if remaining > 0 && self.should_show_todo_footer() {
+            let mut block_lines = render_todo_block_lines(
+                &todo_header_text(&self.todo_footer),
+                &self.todo_footer,
+                &self.theme,
+                lines.is_empty() && self.visible_activity_rows() > 0,
+                remaining,
+            );
+            lines.append(&mut block_lines);
         }
 
         lines
+    }
+
+    fn subagent_todo_blocks(&self) -> Vec<SubagentTodoBlock> {
+        self.timeline
+            .iter()
+            .filter_map(|block| match block {
+                TimelineBlock::Tool(tool)
+                    if tool.name == "task"
+                        && tool.result_preview.is_none()
+                        && !tool.subagent_todo.is_empty() =>
+                {
+                    Some(SubagentTodoBlock {
+                        header: summarize_tool_args(
+                            "task",
+                            &tool.args_preview,
+                            TASK_PROMPT_SUMMARY_CHARS,
+                        ),
+                        items: tool.subagent_todo.clone(),
+                    })
+                }
+                _ => None,
+            })
+            .collect()
     }
 
     fn block_to_lines(&self, block: &TimelineBlock) -> Vec<Line<'static>> {
@@ -1013,6 +1196,7 @@ impl CliApp {
                         format!("  +{} more tool uses (ctrl+b to expand)", count),
                         self.theme.status,
                     )),
+                    PlannedExecutingLine::OutputLine { .. } | PlannedExecutingLine::FoldedOutput { .. } => {}
                 }
             }
 
@@ -1215,18 +1399,63 @@ fn truncate_str(text: &str, max_chars: usize) -> String {
     format!("{}...", &text[..end])
 }
 
-fn advance_towards(current: u64, target: u64) -> u64 {
+fn advance_towards(current: u64, target: u64, max_step: u64) -> u64 {
     if current >= target {
         return target;
     }
 
     let remaining = target - current;
-    if remaining <= 24 {
+    if remaining <= 12 {
         return target;
     }
 
-    let step = (remaining / 3).max(16);
+    let step = (remaining / 3).max(24).min(max_step);
     (current + step).min(target)
+}
+
+fn format_duration(seconds: u64) -> String {
+    if seconds < 60 {
+        return format!("{seconds}s");
+    }
+
+    let minutes = seconds / 60;
+    let seconds = seconds % 60;
+    if minutes < 60 {
+        return format!("{minutes}m{seconds:02}s");
+    }
+
+    let hours = minutes / 60;
+    let minutes = minutes % 60;
+    format!("{hours}h{minutes:02}m")
+}
+
+fn format_duration_slot(seconds: u64) -> String {
+    format!("{:>6}", format_duration(seconds))
+}
+
+fn format_token_count(tokens: u64) -> String {
+    match tokens {
+        0..=999 => tokens.to_string(),
+        1_000..=999_999 => format_compact(tokens, 1_000, "k"),
+        _ => format_compact(tokens, 1_000_000, "m"),
+    }
+}
+
+fn format_token_slot(tokens: u64) -> String {
+    if tokens == 0 {
+        return format!("{:>5}", "-");
+    }
+    format!("{:>5}", format_token_count(tokens))
+}
+
+fn format_compact(value: u64, divisor: u64, suffix: &str) -> String {
+    let whole = value / divisor;
+    let tenth = (value % divisor) / (divisor / 10);
+    if tenth == 0 {
+        format!("{whole}{suffix}")
+    } else {
+        format!("{whole}.{tenth}{suffix}")
+    }
 }
 
 #[derive(Debug, Deserialize)]
@@ -1385,13 +1614,56 @@ fn todo_status_label(status: &TodoStatusPreview) -> &'static str {
     }
 }
 
-fn format_todo_item(item: &FrontendTodoItem) -> String {
-    let status = match item.status {
-        FrontendTodoStatus::Pending => "[ ]",
-        FrontendTodoStatus::InProgress => "[>]",
-        FrontendTodoStatus::Completed => "[x]",
+fn render_todo_item_line(item: &FrontendTodoItem, theme: &CliTheme) -> Line<'static> {
+    let (marker, marker_style, text_style) = match item.status {
+        FrontendTodoStatus::Pending => ("□", theme.todo_pending, theme.todo_pending),
+        FrontendTodoStatus::InProgress => ("■", theme.todo_in_progress, theme.todo_in_progress),
+        FrontendTodoStatus::Completed => ("✓", theme.todo_completed, theme.todo_completed),
     };
-    format!("{status} #{}: {}", item.id, item.text)
+
+    Line::from(vec![
+        Span::styled("  ", theme.todo_connector),
+        Span::styled(marker.to_string(), marker_style),
+        Span::styled(" ", theme.todo_connector),
+        Span::styled(item.text.clone(), text_style),
+    ])
+}
+
+fn render_todo_block_lines(
+    header: &str,
+    items: &[FrontendTodoItem],
+    theme: &CliTheme,
+    connect_to_activity: bool,
+    max_lines: usize,
+) -> Vec<Line<'static>> {
+    if max_lines == 0 {
+        return Vec::new();
+    }
+
+    let header_prefix = if connect_to_activity { "└ " } else { "• " };
+    let mut lines = vec![Line::from(vec![
+        Span::styled(header_prefix, theme.todo_connector),
+        Span::styled(header.to_string(), theme.footer),
+    ])];
+
+    let item_rows = max_lines.saturating_sub(1);
+    for item in items.iter().take(item_rows) {
+        lines.push(render_todo_item_line(item, theme));
+    }
+
+    lines
+}
+
+fn todo_header_text(items: &[FrontendTodoItem]) -> String {
+    items.iter()
+        .find(|item| item.status == FrontendTodoStatus::InProgress)
+        .or_else(|| {
+            items.iter()
+                .find(|item| item.status == FrontendTodoStatus::Pending)
+        })
+        .map(|item| item.text.clone())
+        .or_else(|| items.first().map(|item| item.text.clone()))
+        .unwrap_or_else(|| "Tasks".to_string())
 }
 
 fn parse_markdown_table(lines: &[&str]) -> Option<(MarkdownTable, usize)> {
@@ -1757,7 +2029,8 @@ mod tests {
             text: "please inspect the repository and summarize the main modules".to_string(),
         });
         let before = app.activity_line().to_string();
-        assert!(before.contains("0 tokens"));
+        assert!(before.contains("↑     -"));
+        assert!(before.contains("↓     -"));
 
         app.apply_event(FrontendEvent::TokenUsage {
             turn_id: 1,
@@ -1767,14 +2040,16 @@ mod tests {
         });
 
         let intermediate = app.activity_line().to_string();
-        assert!(!intermediate.contains("513 tokens"));
+        assert!(!intermediate.contains("↑ 321"));
+        assert!(!intermediate.contains("↓ 192"));
 
         for _ in 0..12 {
             app.tick();
         }
 
         let line = app.activity_line().to_string();
-        assert!(line.contains("513 tokens"));
+        assert!(line.contains("↑   321"));
+        assert!(line.contains("↓   192"));
     }
 
     #[test]
@@ -1797,6 +2072,39 @@ mod tests {
     }
 
     #[test]
+    fn executing_bash_shows_live_output_tail() {
+        let mut app = CliApp::new();
+        app.apply_event(FrontendEvent::ToolCallStarted {
+            turn_id: 1,
+            call_id: "bash-1".to_string(),
+            name: "bash".to_string(),
+            args_preview: "{\"command\":\"echo hi\"}".to_string(),
+        });
+        app.apply_event(FrontendEvent::ToolCallOutputDelta {
+            turn_id: 1,
+            call_id: "bash-1".to_string(),
+            delta: "one\ntwo\nthree\nfour\nfive\n".to_string(),
+            is_err_stream: false,
+        });
+
+        let lines = app.render_executing_tools_lines(8);
+        let rendered: Vec<String> = lines
+            .iter()
+            .map(|line| line.spans.iter().map(|span| span.content.as_ref()).collect())
+            .collect();
+
+        // Shows only tail lines by default.
+        assert!(!rendered.iter().any(|line| line.contains("one")));
+        assert!(rendered.iter().any(|line| line.contains("two")));
+        assert!(rendered.iter().any(|line| line.contains("three")));
+        assert!(rendered.iter().any(|line| line.contains("four")));
+        assert!(rendered.iter().any(|line| line.contains("five")));
+        assert!(rendered
+            .iter()
+            .any(|line| line.contains("more output lines")));
+    }
+
+    #[test]
     fn executing_tools_hide_activity_line_until_assistant_resumes() {
         let mut app = CliApp::new();
         app.apply_event(FrontendEvent::UserMessageCommitted {
@@ -1812,7 +2120,8 @@ mod tests {
             args_preview: r#"{"command":"brew install nginx"}"#.to_string(),
         });
 
-        assert_eq!(app.visible_activity_rows(), 0);
+        assert_eq!(app.visible_activity_rows(), ACTIVITY_ROWS);
+        assert_eq!(app.activity_line().to_string().trim(), "");
 
         app.apply_event(FrontendEvent::ToolCallFinished {
             turn_id: 1,
@@ -2029,9 +2338,49 @@ mod tests {
     fn token_animation_advances_towards_target() {
         let mut value = 0;
         for _ in 0..20 {
-            value = advance_towards(value, 513);
+            value = advance_towards(value, 513, 256);
         }
         assert_eq!(value, 513);
+    }
+
+    #[test]
+    fn activity_line_formats_duration_and_compact_tokens() {
+        let mut app = CliApp::new();
+        app.apply_event(FrontendEvent::UserMessageCommitted {
+            turn_id: 1,
+            text: "hello".to_string(),
+        });
+        app.displayed_input_tokens = 1_300;
+        app.displayed_output_tokens = 240;
+        app.spinner.reset();
+        app.spinner.set_started_at_for_test(
+            std::time::Instant::now() - std::time::Duration::from_secs(100),
+        );
+
+        let line = app.activity_line().to_string();
+        assert!(line.contains("( 1m40s"));
+        assert!(line.contains("↑  1.3k"));
+        assert!(line.contains("↓   240"));
+    }
+
+    #[test]
+    fn status_line_shows_split_token_counts() {
+        let mut app = CliApp::new();
+        app.displayed_input_tokens = 9_900;
+        app.displayed_output_tokens = 1_300;
+
+        let line = app.status_line().to_string();
+        assert!(line.contains("↑  9.9k"));
+        assert!(line.contains("↓  1.3k"));
+    }
+
+    #[test]
+    fn token_slots_stay_fixed_width() {
+        assert_eq!(format_token_slot(0).len(), 5);
+        assert_eq!(format_token_slot(12).len(), 5);
+        assert_eq!(format_token_slot(1_300).len(), 5);
+        assert_eq!(format_duration_slot(7).len(), 6);
+        assert_eq!(format_duration_slot(100).len(), 6);
     }
 
     #[test]
@@ -2146,7 +2495,8 @@ mod tests {
         let buffer = render_buffer(&mut app, 40, height);
         let lines = buffer_text(&buffer);
         assert!(lines.iter().any(|line| line.contains("Pinned footer")));
-        assert!(lines.iter().any(|line| line.contains("Tasks (0/1)")));
+        assert!(lines.iter().any(|line| line.contains("• Pinned footer")));
+        assert!(lines.iter().any(|line| line.contains("■ Pinned footer")));
         assert!(lines.iter().any(|line| line.contains("> ")));
     }
 
@@ -2175,8 +2525,8 @@ mod tests {
         assert!(lines[0].contains("Bash"));
         assert!(lines[0].contains("cargo test"));
         assert!(lines[1].trim().is_empty());
-        assert!(lines[2].contains("Tasks (0/1)"));
-        assert!(lines[3].contains("Pinned footer"));
+        assert!(lines[2].contains("Pinned footer"));
+        assert!(lines[3].contains("■ Pinned footer"));
         assert!(lines[5..8].iter().any(|line| line.contains("> ")));
     }
 
@@ -2244,10 +2594,173 @@ mod tests {
         let buffer = render_buffer(&mut app, 40, height);
         let lines = buffer_text(&buffer);
 
+        assert!(lines.iter().any(|line| line.contains("□ One")));
+        assert!(lines.iter().any(|line| line.contains("■ Two")));
+        assert!(lines.iter().any(|line| line.contains("✓ Three")));
         assert!(lines.iter().any(|line| line.contains("One")));
         assert!(lines.iter().any(|line| line.contains("Two")));
         assert!(lines.iter().any(|line| line.contains("Three")));
         assert!(!lines.iter().any(|line| line.contains("+1 more")));
+    }
+
+    #[test]
+    fn todo_footer_connects_to_activity_line_when_spinner_visible() {
+        let mut app = CliApp::new();
+        app.apply_event(FrontendEvent::UserMessageCommitted {
+            turn_id: 1,
+            text: "hello".to_string(),
+        });
+        app.apply_event(FrontendEvent::TodoSnapshot {
+            turn_id: 1,
+            items: vec![
+                FrontendTodoItem {
+                    id: 1,
+                    text: "Pending".to_string(),
+                    status: FrontendTodoStatus::Pending,
+                },
+                FrontendTodoItem {
+                    id: 2,
+                    text: "Running".to_string(),
+                    status: FrontendTodoStatus::InProgress,
+                },
+                FrontendTodoItem {
+                    id: 3,
+                    text: "Done".to_string(),
+                    status: FrontendTodoStatus::Completed,
+                },
+            ],
+        });
+
+        let lines = app.render_todo_footer_lines(4);
+        let rendered: Vec<String> = lines
+            .iter()
+            .map(|line| line.spans.iter().map(|span| span.content.as_ref()).collect())
+            .collect();
+
+        assert!(rendered[0].contains("└ Running"));
+        assert!(rendered[1].contains("□ Pending"));
+        assert!(rendered[2].contains("■ Running"));
+        assert!(rendered[3].contains("✓ Done"));
+    }
+
+    #[test]
+    fn todo_header_prefers_in_progress_then_pending() {
+        let in_progress = todo_header_text(&[
+            FrontendTodoItem {
+                id: 1,
+                text: "Done".to_string(),
+                status: FrontendTodoStatus::Completed,
+            },
+            FrontendTodoItem {
+                id: 2,
+                text: "Running".to_string(),
+                status: FrontendTodoStatus::InProgress,
+            },
+            FrontendTodoItem {
+                id: 3,
+                text: "Later".to_string(),
+                status: FrontendTodoStatus::Pending,
+            },
+        ]);
+        assert_eq!(in_progress, "Running");
+
+        let pending = todo_header_text(&[
+            FrontendTodoItem {
+                id: 1,
+                text: "Done".to_string(),
+                status: FrontendTodoStatus::Completed,
+            },
+            FrontendTodoItem {
+                id: 2,
+                text: "Next".to_string(),
+                status: FrontendTodoStatus::Pending,
+            },
+        ]);
+        assert_eq!(pending, "Next");
+    }
+
+    #[test]
+    fn subagent_todo_renders_as_independent_block() {
+        let mut app = CliApp::new();
+        app.apply_event(FrontendEvent::ToolCallStarted {
+            turn_id: 1,
+            call_id: "task-1".to_string(),
+            name: "task".to_string(),
+            args_preview: r#"{"prompt":"Analyze repository health"}"#.to_string(),
+        });
+        app.apply_event(FrontendEvent::SubagentTodoSnapshot {
+            turn_id: 1,
+            call_id: "task-1".to_string(),
+            items: vec![
+                FrontendTodoItem {
+                    id: 1,
+                    text: "Scan modules".to_string(),
+                    status: FrontendTodoStatus::Completed,
+                },
+                FrontendTodoItem {
+                    id: 2,
+                    text: "Summarize risks".to_string(),
+                    status: FrontendTodoStatus::InProgress,
+                },
+            ],
+        });
+
+        let rendered: Vec<String> = app
+            .render_todo_footer_lines(4)
+            .iter()
+            .map(|line| line.spans.iter().map(|span| span.content.as_ref()).collect())
+            .collect();
+
+        assert!(rendered[0].contains("Analyze repository health"));
+        assert!(rendered[1].contains("✓ Scan modules"));
+        assert!(rendered[2].contains("■ Summarize risks"));
+    }
+
+    #[test]
+    fn subagent_todo_renders_above_main_todo() {
+        let mut app = CliApp::new();
+        app.apply_event(FrontendEvent::TodoSnapshot {
+            turn_id: 1,
+            items: vec![FrontendTodoItem {
+                id: 1,
+                text: "Main todo".to_string(),
+                status: FrontendTodoStatus::InProgress,
+            }],
+        });
+        app.apply_event(FrontendEvent::ToolCallStarted {
+            turn_id: 1,
+            call_id: "task-1".to_string(),
+            name: "task".to_string(),
+            args_preview: r#"{"prompt":"Analyze repository health"}"#.to_string(),
+        });
+        app.apply_event(FrontendEvent::SubagentTodoSnapshot {
+            turn_id: 1,
+            call_id: "task-1".to_string(),
+            items: vec![FrontendTodoItem {
+                id: 1,
+                text: "Subagent todo".to_string(),
+                status: FrontendTodoStatus::InProgress,
+            }],
+        });
+
+        let rendered: Vec<String> = app
+            .render_todo_footer_lines(5)
+            .iter()
+            .map(|line| line.spans.iter().map(|span| span.content.as_ref()).collect())
+            .collect();
+
+        let subagent_index = rendered
+            .iter()
+            .position(|line| line.contains("Analyze repository health"))
+            .expect("subagent header");
+        let main_index = rendered
+            .iter()
+            .position(|line| line.contains("Main todo"))
+            .expect("main header");
+
+        assert!(subagent_index < main_index);
+        assert!(rendered.iter().any(|line| line.contains("■ Subagent todo")));
+        assert!(rendered.iter().any(|line| line.contains("■ Main todo")));
     }
 
     #[test]

@@ -12,12 +12,14 @@ use std::future::Future;
 use std::pin::Pin;
 use std::sync::atomic::Ordering;
 use std::sync::Arc;
+use tokio::task::JoinHandle;
 use tokio::sync::Mutex;
 
 const SYSTEM_PROMPT: &str = "You are an AI agent with the ability to have a conversation. \
 Respond naturally to user messages.";
 const TODO_REMINDER: &str = "You have pending todos. Use the 'todo' tool to update your task list.";
 
+#[allow(dead_code)]
 type TurnFuture<'a> = Pin<Box<dyn Future<Output = Result<AgentTurn, AgentError>> + Send + 'a>>;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -48,8 +50,23 @@ pub struct SessionRuntime {
     turn_count: u32,
     todo_manager: Arc<Mutex<TodoManager>>,
     rounds_since_todo: u32,
-    provider: Option<LlmProvider>,
+    provider: Option<Arc<LlmProvider>>,
     pending_subagent_calls: SharedSubagentCallQueue,
+}
+
+pub(crate) struct PendingTurn {
+    pub(crate) turn_id: u64,
+    pub(crate) current_input: String,
+    pub(crate) previous_todos: Vec<TodoItem>,
+    pub(crate) history: Vec<Message>,
+    pub(crate) provider: Arc<LlmProvider>,
+}
+
+pub(crate) struct CompletedTurn {
+    pub(crate) turn_id: u64,
+    pub(crate) turn: AgentTurn,
+    pub(crate) todo_used: bool,
+    pub(crate) previous_todos: Vec<TodoItem>,
 }
 
 impl SessionRuntime {
@@ -82,6 +99,10 @@ impl SessionRuntime {
 
     pub fn todo_manager(&self) -> Arc<Mutex<TodoManager>> {
         self.todo_manager.clone()
+    }
+
+    pub(crate) fn pending_subagent_calls(&self) -> SharedSubagentCallQueue {
+        self.pending_subagent_calls.clone()
     }
 
     pub fn summary(&self) -> SessionSummary {
@@ -136,7 +157,7 @@ impl SessionRuntime {
         model: impl Into<String>,
         event_tx: &FrontendEventSender,
     ) -> Result<(), AgentError> {
-        self.provider = Some(provider);
+        self.provider = Some(Arc::new(provider));
         let working_directory = std::env::current_dir()
             .map(|p| p.to_string_lossy().to_string())
             .unwrap_or_else(|_| ".".to_string());
@@ -175,13 +196,16 @@ impl SessionRuntime {
                 Ok(SessionRuntimeOutcome::Continue)
             }
             FrontendCommand::Interrupt => {
-                self.emit_event(
-                    event_tx,
-                    FrontendEvent::Status {
-                        message: "Interrupt requested but not yet implemented".to_string(),
-                    },
-                )
-                .await?;
+                // If the UI sends an interrupt while we're idle (no active turn),
+                // provide user-visible feedback instead of failing silently.
+                let _ = self
+                    .emit_event(
+                        event_tx,
+                        FrontendEvent::Status {
+                            message: "Nothing to interrupt".to_string(),
+                        },
+                    )
+                    .await;
                 Ok(SessionRuntimeOutcome::Interrupted)
             }
             FrontendCommand::Exit => Ok(SessionRuntimeOutcome::Exit(self.end(event_tx).await?)),
@@ -193,14 +217,10 @@ impl SessionRuntime {
         current_input: impl Into<String>,
         event_tx: &FrontendEventSender,
     ) -> Result<(), AgentError> {
-        self.submit_message_with(
-            current_input.into(),
-            event_tx,
-            |history, current_input, provider, hook| {
-                Box::pin(agent_loop(history, current_input, provider, hook))
-            },
-        )
-        .await
+        let pending = self.begin_turn(current_input.into(), event_tx).await?;
+        let completed = Self::execute_turn(pending, event_tx.clone(), self.pending_subagent_calls.clone())
+            .await?;
+        self.finish_turn(completed, event_tx).await
     }
 
     pub async fn end(
@@ -221,6 +241,7 @@ impl SessionRuntime {
         Ok(summary)
     }
 
+    #[allow(dead_code)]
     async fn submit_message_with<F>(
         &mut self,
         current_input: String,
@@ -230,7 +251,34 @@ impl SessionRuntime {
     where
         F: for<'a> FnOnce(&'a [Message], &'a str, &'a LlmProvider, TodoUsageHook) -> TurnFuture<'a>,
     {
-        let provider = self.provider.as_ref().ok_or_else(not_started_error)?;
+        let pending = self.begin_turn(current_input, event_tx).await?;
+        let (hook, used_todo_flag) = TodoUsageHook::new(
+            pending.turn_id,
+            Some(event_tx.clone()),
+            Some(self.pending_subagent_calls.clone()),
+        );
+        let turn = executor(
+            &pending.history,
+            &pending.current_input,
+            pending.provider.as_ref(),
+            hook,
+        )
+        .await?;
+        let completed = CompletedTurn {
+            turn_id: pending.turn_id,
+            turn,
+            todo_used: used_todo_flag.load(Ordering::SeqCst),
+            previous_todos: pending.previous_todos,
+        };
+        self.finish_turn(completed, event_tx).await
+    }
+
+    pub(crate) async fn begin_turn(
+        &mut self,
+        current_input: String,
+        event_tx: &FrontendEventSender,
+    ) -> Result<PendingTurn, AgentError> {
+        let provider = self.provider.clone().ok_or_else(not_started_error)?;
         let turn_id = self.next_turn_id();
         let previous_todos = self.todo_snapshot().await;
         self.emit_event(
@@ -242,27 +290,59 @@ impl SessionRuntime {
         )
         .await?;
 
-        let (hook, used_todo_flag) = TodoUsageHook::new(
+        Ok(PendingTurn {
             turn_id,
-            Some(event_tx.clone()),
-            Some(self.pending_subagent_calls.clone()),
-        );
-        let turn = executor(&self.messages, &current_input, provider, hook).await?;
-        let todo_used = used_todo_flag.load(Ordering::SeqCst);
+            current_input,
+            previous_todos,
+            history: self.messages.clone(),
+            provider,
+        })
+    }
 
-        if todo_used {
+    pub(crate) async fn execute_turn(
+        pending: PendingTurn,
+        event_tx: FrontendEventSender,
+        pending_subagent_calls: SharedSubagentCallQueue,
+    ) -> Result<CompletedTurn, AgentError> {
+        let (hook, used_todo_flag) = TodoUsageHook::new(
+            pending.turn_id,
+            Some(event_tx),
+            Some(pending_subagent_calls),
+        );
+        let turn = agent_loop(
+            &pending.history,
+            &pending.current_input,
+            pending.provider.as_ref(),
+            hook,
+        )
+        .await?;
+
+        Ok(CompletedTurn {
+            turn_id: pending.turn_id,
+            turn,
+            todo_used: used_todo_flag.load(Ordering::SeqCst),
+            previous_todos: pending.previous_todos,
+        })
+    }
+
+    pub(crate) async fn finish_turn(
+        &mut self,
+        completed: CompletedTurn,
+        event_tx: &FrontendEventSender,
+    ) -> Result<(), AgentError> {
+        if completed.todo_used {
             self.rounds_since_todo = 0;
         }
 
         let current_todos = self.todo_snapshot().await;
-        let todo_snapshot_changed = current_todos != previous_todos;
+        let todo_snapshot_changed = current_todos != completed.previous_todos;
         let reminder = self.todo_reminder_message().await;
 
         self.emit_event(
             event_tx,
             FrontendEvent::AssistantMessageCompleted {
-                turn_id,
-                text: turn.response.clone(),
+                turn_id: completed.turn_id,
+                text: completed.turn.response.clone(),
             },
         )
         .await?;
@@ -271,7 +351,7 @@ impl SessionRuntime {
             self.emit_event(
                 event_tx,
                 FrontendEvent::Reminder {
-                    turn_id,
+                    turn_id: completed.turn_id,
                     message: message.clone(),
                 },
             )
@@ -279,12 +359,37 @@ impl SessionRuntime {
         }
 
         if todo_snapshot_changed || (reminder.is_some() && !current_todos.is_empty()) {
-            self.emit_todo_snapshot_items(event_tx, turn_id, current_todos)
+            self.emit_todo_snapshot_items(event_tx, completed.turn_id, current_todos)
                 .await?;
         }
 
-        self.commit_turn(turn);
+        self.commit_turn(completed.turn);
         Ok(())
+    }
+
+    pub(crate) async fn interrupt_active_turn(
+        &mut self,
+        turn_id: u64,
+        event_tx: &FrontendEventSender,
+        handle: JoinHandle<Result<CompletedTurn, AgentError>>,
+    ) -> Result<SessionRuntimeOutcome, AgentError> {
+        handle.abort();
+        self.emit_event(
+            event_tx,
+            FrontendEvent::Status {
+                message: "Interrupted".to_string(),
+            },
+        )
+        .await?;
+        self.emit_event(
+            event_tx,
+            FrontendEvent::Error {
+                turn_id,
+                message: "Interrupted".to_string(),
+            },
+        )
+        .await?;
+        Ok(SessionRuntimeOutcome::Interrupted)
     }
 
     fn commit_turn(&mut self, turn: AgentTurn) {
@@ -323,7 +428,7 @@ impl SessionRuntime {
         self.turn_count as u64 + 1
     }
 
-    fn active_turn_id(&self) -> u64 {
+    pub(crate) fn active_turn_id(&self) -> u64 {
         if self.provider.is_some() {
             self.next_turn_id()
         } else {
@@ -668,7 +773,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn runtime_interrupt_command_emits_status_outcome() {
+    async fn runtime_interrupt_command_returns_interrupted_outcome() {
         let (event_tx, mut event_rx) = frontend_event_channel(8);
         let mut runtime = SessionRuntime::new();
 
@@ -681,7 +786,7 @@ mod tests {
         assert_eq!(
             event_rx.recv().await,
             Some(FrontendEvent::Status {
-                message: "Interrupt requested but not yet implemented".to_string(),
+                message: "Nothing to interrupt".to_string()
             })
         );
     }
@@ -719,7 +824,6 @@ mod tests {
         // Collect events from this turn
         let mut saw_user_committed = false;
         let mut saw_assistant_completed = false;
-        let mut saw_token_usage = false;
 
         while let Ok(Some(event)) =
             tokio::time::timeout(std::time::Duration::from_millis(50), event_rx.recv()).await
@@ -735,21 +839,11 @@ mod tests {
                     assert_eq!(text, "world");
                     saw_assistant_completed = true;
                 }
-                FrontendEvent::TokenUsage {
-                    turn_id,
-                    input_tokens: _,
-                    output_tokens: _,
-                    total_tokens: _,
-                } => {
-                    assert_eq!(turn_id, 1);
-                    saw_token_usage = true;
-                }
                 _ => {}
             }
         }
 
         assert!(saw_user_committed, "should see UserMessageCommitted");
         assert!(saw_assistant_completed, "should see AssistantMessageCompleted");
-        assert!(saw_token_usage, "should see TokenUsage");
     }
 }

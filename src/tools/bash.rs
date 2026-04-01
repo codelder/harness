@@ -4,7 +4,11 @@ use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use std::process::Stdio;
 use std::time::Duration;
+use tokio::io::AsyncReadExt;
 use tokio::process::Command;
+use tokio::sync::mpsc;
+use crate::frontend::{FrontendEvent};
+use crate::frontend::tool_ui::emit_tool_output;
 /// Arguments for the Bash tool
 #[derive(Debug, Clone, Deserialize, JsonSchema)]
 pub struct BashArgs {
@@ -122,17 +126,77 @@ Usage notes:
         let mut cmd = Command::new("bash");
         cmd.arg("-c").arg(&args.command);
         cmd.stdin(Stdio::null());
+        cmd.stdout(Stdio::piped());
+        cmd.stderr(Stdio::piped());
 
-        let result = tokio::time::timeout(Duration::from_secs(args.timeout), cmd.output()).await;
+        let mut child = cmd
+            .spawn()
+            .map_err(|e| BashError::ExecutionFailed(e.to_string()))?;
 
-        let output = match result {
-            Ok(Ok(output)) => output,
-            Ok(Err(e)) => return Err(BashError::ExecutionFailed(e.to_string())),
-            Err(_) => return Err(BashError::Timeout(args.timeout)),
+        let stdout = child
+            .stdout
+            .take()
+            .ok_or_else(|| BashError::ExecutionFailed("Failed to capture stdout".to_string()))?;
+        let stderr = child
+            .stderr
+            .take()
+            .ok_or_else(|| BashError::ExecutionFailed("Failed to capture stderr".to_string()))?;
+
+        let (chunk_tx, mut chunk_rx) = mpsc::unbounded_channel::<(bool, Vec<u8>)>();
+
+        tokio::spawn(read_stream(stdout, false, chunk_tx.clone()));
+        tokio::spawn(read_stream(stderr, true, chunk_tx));
+
+        let mut stdout_buf: Vec<u8> = Vec::new();
+        let mut stderr_buf: Vec<u8> = Vec::new();
+
+        let timeout = tokio::time::sleep(Duration::from_secs(args.timeout));
+        tokio::pin!(timeout);
+
+        let status = loop {
+            tokio::select! {
+                maybe_chunk = chunk_rx.recv() => {
+                    let Some((is_stderr, bytes)) = maybe_chunk else { continue; };
+                    if is_stderr {
+                        stderr_buf.extend_from_slice(&bytes);
+                    } else {
+                        stdout_buf.extend_from_slice(&bytes);
+                    }
+
+                    let delta = String::from_utf8_lossy(&bytes).to_string();
+                    emit_tool_output(delta, is_stderr, |ctx, delta, is_stderr| {
+                        FrontendEvent::ToolCallOutputDelta {
+                            turn_id: ctx.turn_id,
+                            call_id: ctx.call_id,
+                            delta,
+                            is_err_stream: is_stderr,
+                        }
+                    }).await;
+                }
+                status = child.wait() => {
+                    match status {
+                        Ok(status) => break status,
+                        Err(e) => return Err(BashError::ExecutionFailed(e.to_string())),
+                    }
+                }
+                _ = &mut timeout => {
+                    let _ = child.kill().await;
+                    return Err(BashError::Timeout(args.timeout));
+                }
+            }
         };
 
-        let stdout = String::from_utf8_lossy(&output.stdout);
-        let stderr = String::from_utf8_lossy(&output.stderr);
+        // Drain any remaining chunks that raced with process exit.
+        while let Ok((is_stderr, bytes)) = chunk_rx.try_recv() {
+            if is_stderr {
+                stderr_buf.extend_from_slice(&bytes);
+            } else {
+                stdout_buf.extend_from_slice(&bytes);
+            }
+        }
+
+        let stdout = String::from_utf8_lossy(&stdout_buf);
+        let stderr = String::from_utf8_lossy(&stderr_buf);
 
         let combined = if !stdout.is_empty() && !stderr.is_empty() {
             format!("{}\n{}", stdout.trim(), stderr.trim())
@@ -144,7 +208,7 @@ Usage notes:
             String::new()
         };
 
-        let result = if output.status.success() {
+        let result = if status.success() {
             if combined.is_empty() {
                 "Command completed successfully (no output)".to_string()
             } else {
@@ -152,7 +216,7 @@ Usage notes:
             }
         } else {
             let truncated = truncate_output(&combined);
-            match output.status.code() {
+            match status.code() {
                 Some(code) => {
                     return Err(BashError::ExecutionFailed(format!(
                         "exit code {}: {}",
@@ -169,6 +233,23 @@ Usage notes:
             &result[..result.len().min(200)]
         );
         Ok(result)
+    }
+}
+
+async fn read_stream(
+    mut stream: impl tokio::io::AsyncRead + Unpin + Send + 'static,
+    is_stderr: bool,
+    tx: mpsc::UnboundedSender<(bool, Vec<u8>)>,
+) {
+    let mut buf = [0u8; 2048];
+    loop {
+        match stream.read(&mut buf).await {
+            Ok(0) => break,
+            Ok(n) => {
+                let _ = tx.send((is_stderr, buf[..n].to_vec()));
+            }
+            Err(_) => break,
+        }
     }
 }
 

@@ -66,6 +66,11 @@ async fn interrupt_command_emits_status_event() {
         .await
         .unwrap();
     let _ = event_rx.recv().await;
+    // The real CLI adapter periodically flushes best-effort events and drains
+    // the queue. Mirror that here so `Status` (best-effort) can't be stuck in
+    // the sender backlog when the bounded channel is full.
+    while event_rx.try_recv().is_ok() {}
+    let _ = event_tx.flush_best_effort().await;
 
     let outcome = runtime
         .handle_command(FrontendCommand::Interrupt, &event_tx)
@@ -74,16 +79,20 @@ async fn interrupt_command_emits_status_event() {
 
     assert_eq!(outcome, SessionRuntimeOutcome::Interrupted);
     let mut saw_status = false;
-    while let Some(event) = event_rx.recv().await {
-        match event {
-            FrontendEvent::Status { message }
-                if message == "Interrupt requested but not yet implemented" =>
-            {
-                saw_status = true;
-                break;
+    // Avoid hanging forever if the status lands in the best-effort backlog.
+    let deadline = tokio::time::Instant::now() + tokio::time::Duration::from_secs(2);
+    while tokio::time::Instant::now() < deadline {
+        let _ = event_tx.flush_best_effort().await;
+        if let Ok(event) = event_rx.try_recv() {
+            if let FrontendEvent::Status { message } = event {
+                if message == "Nothing to interrupt" {
+                    saw_status = true;
+                    break;
+                }
             }
-            _ => {}
+            continue;
         }
+        tokio::time::sleep(tokio::time::Duration::from_millis(10)).await;
     }
     assert!(saw_status, "interrupt should emit status feedback");
 }

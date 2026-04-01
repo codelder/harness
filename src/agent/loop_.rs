@@ -4,6 +4,7 @@ use crate::frontend::{
     FrontendEvent, FrontendEventSender, FrontendSubagentToolUse, FrontendTodoItem,
     FrontendTodoStatus, SESSION_START_TURN_ID,
 };
+use crate::frontend::tool_ui::{clear_tool_ui_context, set_tool_ui_context, ToolUiContext};
 use crate::subagent::{PendingSubagentCall, SharedSubagentCallQueue};
 use rig::agent::{HookAction, PromptHook, ToolCallHookAction};
 use rig::completion::{AssistantContent, CompletionModel};
@@ -127,6 +128,14 @@ impl TodoUsageHook {
 
         let call_id = tool_call_id.unwrap_or_else(|| internal_call_id.to_string());
 
+        if let Some(event_tx) = &self.event_tx {
+            set_tool_ui_context(ToolUiContext {
+                turn_id: self.turn_id,
+                call_id: call_id.clone(),
+                event_tx: event_tx.clone(),
+            });
+        }
+
         if tool_name == "task" {
             if let (Some(queue), Some(event_tx)) = (&self.pending_subagent_calls, &self.event_tx) {
                 queue.lock().await.push_back(PendingSubagentCall {
@@ -156,8 +165,24 @@ impl TodoUsageHook {
         result: &str,
     ) {
         if self.subagent_progress.is_some() {
+            if tool_name == "todo" {
+                if let (Some(items), Some(progress)) =
+                    (parse_todo_snapshot_args(args), &self.subagent_progress)
+                {
+                    let _ = progress
+                        .event_tx
+                        .emit(FrontendEvent::SubagentTodoSnapshot {
+                            turn_id: progress.parent_turn_id,
+                            call_id: progress.parent_call_id.clone(),
+                            items,
+                        })
+                        .await;
+                }
+            }
             return;
         }
+
+        clear_tool_ui_context();
 
         tracing::debug!(
             tool_name,
