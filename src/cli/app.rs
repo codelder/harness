@@ -18,6 +18,7 @@ const COMPOSER_ROWS: u16 = 3;
 const STATUS_ROWS: u16 = 1;
 const COMPOSER_PROMPT: &str = "> ";
 const DEFAULT_VISIBLE_SUBAGENT_TOOLS: usize = 4;
+const DEFAULT_VISIBLE_TOOL_RESULT_LINES: usize = 24;
 const TASK_PROMPT_SUMMARY_CHARS: usize = 48;
 const SUBAGENT_TOOL_ARGS_CHARS: usize = 40;
 const TOOL_RESULT_LINE_CHARS: usize = 160;
@@ -117,6 +118,7 @@ pub struct CliApp {
     displayed_output_tokens: u64,
     target_input_tokens: u64,
     target_output_tokens: u64,
+    expand_tool_results: bool,
     /// Index of the next timeline block to insert above the viewport.
     last_inserted_index: usize,
     /// Result lines for tool blocks that were already drained before their result arrived.
@@ -146,6 +148,7 @@ impl CliApp {
             displayed_output_tokens: 0,
             target_input_tokens: 0,
             target_output_tokens: 0,
+            expand_tool_results: false,
             last_inserted_index: 0,
             pending_tool_result_lines: Vec::new(),
             expand_subagent_tools: false,
@@ -461,6 +464,10 @@ impl CliApp {
             }
             (KeyCode::Char('b'), modifiers) if modifiers.contains(KeyModifiers::CONTROL) => {
                 self.expand_subagent_tools = !self.expand_subagent_tools;
+                None
+            }
+            (KeyCode::Char('o'), modifiers) if modifiers.contains(KeyModifiers::CONTROL) => {
+                self.expand_tool_results = !self.expand_tool_results;
                 None
             }
             (KeyCode::Enter, _) => {
@@ -1300,7 +1307,13 @@ impl CliApp {
                 if tool.name == "bash" && !tool.is_error {
                     lines.extend(render_bash_result_preview(result, result_style));
                 } else {
-                    for (i, line) in result.lines().enumerate() {
+                    let all_lines: Vec<&str> = result.lines().collect();
+                    let (visible_lines, hidden) = visible_tail_lines(
+                        &all_lines,
+                        self.expand_tool_results,
+                        DEFAULT_VISIBLE_TOOL_RESULT_LINES,
+                    );
+                    for (i, line) in visible_lines.iter().enumerate() {
                         let line = truncate_str(line, TOOL_RESULT_LINE_CHARS);
                         if i == 0 {
                             lines.push(Line::from(vec![
@@ -1310,6 +1323,12 @@ impl CliApp {
                         } else {
                             lines.push(Line::styled(format!("    {}", line), result_style));
                         }
+                    }
+                    if hidden > 0 {
+                        lines.push(Line::styled(
+                            format!("  +{} more output lines (Ctrl+O to expand)", hidden),
+                            self.theme.status,
+                        ));
                     }
                 }
             }
@@ -1359,7 +1378,13 @@ impl CliApp {
                 } else {
                     self.theme.tool_result
                 };
-                for (i, line) in result.lines().enumerate() {
+                let all_lines: Vec<&str> = result.lines().collect();
+                let (visible_lines, hidden) = visible_tail_lines(
+                    &all_lines,
+                    self.expand_tool_results,
+                    DEFAULT_VISIBLE_TOOL_RESULT_LINES,
+                );
+                for (i, line) in visible_lines.iter().enumerate() {
                     let line = truncate_str(line, TOOL_RESULT_LINE_CHARS);
                     if i == 0 {
                         lines.push(Line::from(vec![
@@ -1370,11 +1395,33 @@ impl CliApp {
                         lines.push(Line::styled(format!("    {}", line), result_style));
                     }
                 }
+                if hidden > 0 {
+                    lines.push(Line::styled(
+                        format!("    +{} more output lines (Ctrl+O to expand)", hidden),
+                        self.theme.status,
+                    ));
+                }
             }
             lines.push(Line::raw(""));
         }
         lines
     }
+}
+
+fn visible_tail_lines<'a>(
+    all_lines: &'a [&'a str],
+    expanded: bool,
+    max_visible: usize,
+) -> (Vec<&'a str>, usize) {
+    if expanded || all_lines.len() <= max_visible {
+        return (all_lines.to_vec(), 0);
+    }
+
+    let start = all_lines.len().saturating_sub(max_visible);
+    (
+        all_lines[start..].to_vec(),
+        all_lines.len().saturating_sub(max_visible),
+    )
 }
 
 /// Detect whether a tool result looks like an error message.
