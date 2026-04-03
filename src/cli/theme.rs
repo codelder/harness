@@ -245,35 +245,43 @@ fn query_osc11_background() -> Option<(u8, u8, u8)> {
     stdout_lock.write_all(b"\x1b]11;?\x07").ok()?;
     stdout_lock.flush().ok()?;
 
-    // Spawn a reader thread; wait with timeout so we don't block if terminal ignores OSC 11.
-    let handle = std::thread::spawn(|| {
-        let mut buf = [0u8; 64];
-        let mut pos = 0;
-        let mut stdin_lock = io::stdin().lock();
+    // Spawn a reader thread that sends its result through a channel.
+    // Using a channel lets us apply a real timeout — bare join() would
+    // block forever if another reader (e.g. crossterm's event loop)
+    // consumes the OSC 11 response from stdin before this thread can.
+    let (tx, rx) = std::sync::mpsc::channel();
 
-        loop {
-            if pos >= buf.len() {
-                return None;
-            }
-            match stdin_lock.read(&mut buf[pos..=pos]) {
-                Ok(0) => return None,
-                Ok(_) => {
-                    pos += 1;
-                    if buf[pos - 1] == 0x07 {
-                        break;
-                    }
-                    if pos >= 2 && buf[pos - 2] == 0x1b && buf[pos - 1] == b'\\' {
-                        break;
-                    }
+    let _handle = std::thread::spawn(move || {
+        let result = {
+            let mut buf = [0u8; 64];
+            let mut pos = 0;
+            let mut stdin_lock = io::stdin().lock();
+
+            loop {
+                if pos >= buf.len() {
+                    break None;
                 }
-                Err(_) => return None,
+                match stdin_lock.read(&mut buf[pos..=pos]) {
+                    Ok(0) => break None,
+                    Ok(_) => {
+                        pos += 1;
+                        if buf[pos - 1] == 0x07 {
+                            break parse_osc11_rgb(&buf[..pos]);
+                        }
+                        if pos >= 2 && buf[pos - 2] == 0x1b && buf[pos - 1] == b'\\' {
+                            break parse_osc11_rgb(&buf[..pos]);
+                        }
+                    }
+                    Err(_) => break None,
+                }
             }
-        }
-        parse_osc11_rgb(&buf[..pos])
+        };
+        let _ = tx.send(result);
     });
 
     // Timeout: if the terminal doesn't support OSC 11 we don't hang.
-    handle.join().unwrap_or_default()
+    rx.recv_timeout(std::time::Duration::from_millis(100))
+        .unwrap_or_default()
 }
 
 /// Parse OSC 11 response bytes into (R, G, B).

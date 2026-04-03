@@ -13,7 +13,7 @@ Harness = Tools + Knowledge + Observation + Action Interfaces + Permissions
 
 ## Language Preference
 
-When working on this project, please use Chinese (中文) for extended thinking.
+When working on this project, please use Chinese (中文) for extended thinking and all output text. Technical terms and code identifiers remain in English.
 
 ## Architecture
 

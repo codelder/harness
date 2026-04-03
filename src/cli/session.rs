@@ -100,14 +100,20 @@ impl Session {
             println!();
         }
 
+        // Create app BEFORE entering raw mode so that theme detection (which may
+        // send an OSC 11 query to stdout and read the response from stdin) does not
+        // race with the crossterm input listener for stdin bytes.  If the listener
+        // consumes the OSC 11 response, query_osc11_background's reader thread
+        // blocks forever on stdin (there is no join timeout), preventing the UI
+        // loop from ever starting — the viewport is created but never drawn.
+        let mut app = CliApp::new();
+
         // Enable raw mode and create inline viewport BEFORE starting input listener.
         // This ensures crossterm's event reader initializes in raw mode,
         // which is required for correct input handling in Warp and other terminals.
         let mut terminal = TerminalGuard::new().map_err(terminal_error)?;
         let stop_flag = Arc::new(AtomicBool::new(false));
         let (input_handle, mut input_rx) = spawn_input_listener(stop_flag.clone());
-
-        let mut app = CliApp::new();
 
         let loop_result = self
             .run_ui_loop(
@@ -155,13 +161,14 @@ impl Session {
             let drained_events = Self::drain_events_and_flush(app, event_rx, event_tx).await?;
             let tick_changed = app.tick();
             let desired_viewport_height = app.desired_viewport_height();
-            let target_viewport_height = if desired_viewport_height > viewport_height {
-                desired_viewport_height
-            } else if desired_viewport_height < viewport_height && app.allow_viewport_shrink() {
-                desired_viewport_height
-            } else {
-                viewport_height
-            };
+            let target_viewport_height =
+                if desired_viewport_height > viewport_height
+                    || (desired_viewport_height < viewport_height && app.allow_viewport_shrink())
+                {
+                    desired_viewport_height
+                } else {
+                    viewport_height
+                };
             let viewport_changed = terminal
                 .set_viewport_height(target_viewport_height)
                 .map_err(terminal_error)?;
